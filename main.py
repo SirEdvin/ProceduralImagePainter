@@ -118,7 +118,7 @@ def main(
     max_size: int = typer.Option(48, help="Maximum font size in pixels."),
     max_rotation: float = typer.Option(60.0, help="Maximum rotation angle in degrees (both directions)."),
     coverage: float = typer.Option(0.85, help="Target canvas coverage fraction (0.0–1.0)."),
-    gray_shade: int = typer.Option(180, help="Gray value (0–255) for text over light areas."),
+    gray_shade: int = typer.Option(140, help="Gray value (0–255) for text over light areas."),
     threshold: float = typer.Option(0.5, help="Luminance threshold separating black vs white areas."),
     seed: Optional[int] = typer.Option(None, help="Random seed for reproducibility."),
     verbose: bool = typer.Option(False, help="Print progress updates."),
@@ -189,7 +189,7 @@ def main(
         if phrase_count >= next_frame_threshold:
             frames.append(Image.fromarray(canvas_arr, mode="RGBA").convert("RGB"))
             last_captured = phrase_count
-            next_frame_threshold = phrase_count + max(1, phrase_count // 2)
+            next_frame_threshold = phrase_count + max(1, phrase_count // 4)
 
         if after == before:
             stall_counter += 1
