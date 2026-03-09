@@ -10,5 +10,6 @@ wheels/
 .venv
 
 # Test/scratch images
-test_input.png
-test_output.png
+*.png
+*.gif
+*.jpg

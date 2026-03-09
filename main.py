@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 app = typer.Typer(help="Render a phrase as typographic halftone art over a B&W image.")
 
 
+
 def find_fonts(font_dir: Path) -> list[Path]:
     """Recursively find all TTF/OTF font files under font_dir."""
     fonts: list[Path] = []
@@ -140,18 +141,19 @@ def main(
         typer.echo(f"No fonts found in '{font_dir}', using Pillow default font.", err=True)
 
     # --- Create output canvas ---
-    # Pre-fill background based on source luminance so uncovered gaps blend in:
-    # dark source areas → light gray background; light source areas → white background
-    bg_gray = np.where(source_lum < threshold, gray_shade, 255).astype(np.uint8)
-    canvas_arr = np.stack([bg_gray, bg_gray, bg_gray, np.full((H, W), 255, dtype=np.uint8)], axis=-1)
+    canvas_arr = np.full((H, W, 4), 255, dtype=np.uint8)
     coverage_mask = np.zeros((H, W), dtype=bool)
 
     if verbose:
         typer.echo(f"Canvas: {W}x{H}  Fonts found: {len(fonts)}  Target coverage: {coverage:.0%}")
 
     iteration = 0
+    phrase_count = 0
+    next_frame_threshold = 1
+    last_captured = -1
     stall_counter = 0
     max_stall = 5000  # give up if this many consecutive placements add nothing
+    frames: list[Image.Image] = []
 
     while True:
         current_coverage = coverage_mask.mean()
@@ -167,8 +169,6 @@ def main(
         iteration += 1
 
         # Random placement parameters
-        cx = rng.randint(0, W - 1)
-        cy = rng.randint(0, H - 1)
         angle = rng.uniform(-max_rotation, max_rotation)
         size = rng.randint(min_size, max_size)
         font_path = rng.choice(fonts) if fonts else None
@@ -176,9 +176,20 @@ def main(
 
         text_img = render_text_mask(phrase, font, angle)
 
+        # Constrain center so the phrase stays fully within the canvas
+        tw, th = text_img.size
+        cx = rng.randint(tw // 2, max(tw // 2, W - 1 - tw // 2))
+        cy = rng.randint(th // 2, max(th // 2, H - 1 - th // 2))
+
         before = coverage_mask.sum()
         paint(source_lum, canvas_arr, coverage_mask, text_img, cx, cy, gray_shade, threshold)
         after = coverage_mask.sum()
+
+        phrase_count += 1
+        if phrase_count >= next_frame_threshold:
+            frames.append(Image.fromarray(canvas_arr, mode="RGBA").convert("RGB"))
+            last_captured = phrase_count
+            next_frame_threshold = phrase_count + max(1, phrase_count // 2)
 
         if after == before:
             stall_counter += 1
@@ -191,10 +202,20 @@ def main(
     if verbose:
         typer.echo(f"Done. {iteration} iterations, final coverage {coverage_mask.mean():.1%}")
 
-    # --- Save output ---
-    result = Image.fromarray(canvas_arr, mode="RGBA").convert("RGB")
-    result.save(output_image)
-    typer.echo(f"Saved to '{output_image}'")
+    # --- Save output as animated GIF ---
+    # Append final frame if it wasn't already captured
+    if phrase_count > last_captured:
+        frames.append(Image.fromarray(canvas_arr, mode="RGBA").convert("RGB"))
+
+    frames[0].save(
+        output_image,
+        format="GIF",
+        save_all=True,
+        append_images=frames[1:],
+        loop=0,
+        duration=500,
+    )
+    typer.echo(f"Saved to '{output_image}' ({len(frames)} frames)")
 
 
 if __name__ == "__main__":
