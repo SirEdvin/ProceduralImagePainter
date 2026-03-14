@@ -13,3 +13,4 @@ wheels/
 *.png
 *.gif
 *.jpg
+!examples/*.gif
