@@ -94,6 +94,25 @@
           <button id="downloadPngBtn" class="btn" disabled>Download PNG</button>
           <button id="downloadGifBtn" class="btn" disabled>Download GIF</button>
         </div>
+
+        <div class="share-section">
+          <div class="share-header">
+            <span class="share-label">Share</span>
+            <label class="include-link-label">
+              <input type="checkbox" id="includeLinkCheck" checked />
+              Include project link
+            </label>
+          </div>
+          <div class="mastodon-row">
+            <label for="mastodonInstance">Mastodon instance</label>
+            <input type="text" id="mastodonInstance" value="mastodon.social" placeholder="mastodon.social" />
+          </div>
+          <div class="btn-row">
+            <button id="shareTwitterBtn" class="btn" disabled>&#x1D54F; Twitter</button>
+            <button id="shareFacebookBtn" class="btn" disabled>Facebook</button>
+            <button id="shareMastodonBtn" class="btn" disabled>Mastodon</button>
+          </div>
+        </div>
       </section>
     </main>
   </div>

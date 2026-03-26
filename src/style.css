@@ -322,6 +322,65 @@ input[type="range"]::-webkit-slider-thumb:hover {
   white-space: nowrap;
 }
 
+/* Share section */
+.share-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+
+.share-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.share-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.include-link-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.include-link-label input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  width: auto;
+}
+
+.mastodon-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.mastodon-row label {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.mastodon-row input {
+  min-width: 0;
+}
+
 /* Responsive */
 @media (max-width: 720px) {
   main {
