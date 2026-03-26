@@ -44,7 +44,7 @@ function randFloat(rng: () => number, min: number, max: number): number {
 function renderTextMask(phrase: string, font: string, size: number, angle: number): TextMask {
   const measureCanvas = new OffscreenCanvas(1, 1);
   const measureCtx = measureCanvas.getContext('2d')!;
-  measureCtx.font = `${size}px ${font}`;
+  measureCtx.font = `${size}px "${font}"`;
   const metrics = measureCtx.measureText(phrase);
 
   const textWidth = Math.ceil(metrics.width);
@@ -56,7 +56,7 @@ function renderTextMask(phrase: string, font: string, size: number, angle: numbe
   const ctx = canvas.getContext('2d')!;
   ctx.translate(diagonal, diagonal);
   ctx.rotate((angle * Math.PI) / 180);
-  ctx.font = `${size}px ${font}`;
+  ctx.font = `${size}px "${font}"`;
   ctx.fillStyle = 'black';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -199,7 +199,8 @@ export class Painter {
 
       const angle = randFloat(this.rng, -this.config.maxRotation, this.config.maxRotation);
       const size = randInt(this.rng, this.config.minSize, this.config.maxSize);
-      const font = this.config.fonts[Math.floor(this.rng() * this.config.fonts.length)];
+      const fontIndex = Math.floor(this.rng() * this.config.fonts.length);
+      const font = this.config.fonts[fontIndex];
 
       const mask = renderTextMask(this.config.phrase, font, size, angle);
       if (mask.count === 0) continue;

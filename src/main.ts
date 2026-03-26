@@ -1,16 +1,111 @@
 import { Painter, type PainterConfig } from './painter';
 import { GIFEncoder, quantize, applyPalette } from 'gifenc';
 
-const FONTS = [
+// Comprehensive list of common web fonts to test for availability
+const COMMON_FONTS = [
+  // Sans-serif
   'Arial',
-  'Georgia',
-  'Courier New',
-  'Times New Roman',
-  'Impact',
-  'Trebuchet MS',
+  'Arial Black',
+  'Arial Narrow',
+  'Helvetica',
+  'Helvetica Neue',
   'Verdana',
+  'Tahoma',
+  'Trebuchet MS',
+  'Calibri',
+  'Segoe UI',
+  'Century Gothic',
+  'Lucida Sans Unicode',
+  'Lucida Grande',
+  'Geneva',
+  'Futura',
+  'Gill Sans',
+  'Optima',
+  'Avenir',
+  // Serif
+  'Times New Roman',
+  'Times',
+  'Georgia',
+  'Garamond',
   'Palatino Linotype',
+  'Palatino',
+  'Book Antiqua',
+  'Baskerville',
+  'Cambria',
+  'Didot',
+  'Bodoni MT',
+  'Rockwell',
+  'Constantia',
+  'Hoefler Text',
+  // Monospace
+  'Courier New',
+  'Courier',
+  'Lucida Console',
+  'Monaco',
+  'Consolas',
+  'Menlo',
+  'Andale Mono',
+  'DejaVu Sans Mono',
+  'Liberation Mono',
+  // Display/Decorative
+  'Impact',
+  'Comic Sans MS',
+  'Brush Script MT',
+  'Copperplate',
+  'Papyrus',
+  'Luminari',
+  'Chalkboard',
+  'Jazz LET',
+  'Marker Felt',
 ];
+
+/**
+ * Detect which fonts from a list are actually available in the browser.
+ * Uses canvas text measurement to compare against a baseline font.
+ */
+function detectAvailableFonts(testFonts: string[]): string[] {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+
+  // Baseline fonts that should always be different
+  const baseFonts = ['monospace', 'sans-serif', 'serif'];
+  const testString = 'mmmmmmmmmmlli';
+  const testSize = '72px';
+
+  // Measure baseline widths
+  const baseWidths = new Map<string, number>();
+  for (const baseFont of baseFonts) {
+    ctx.font = `${testSize} ${baseFont}`;
+    baseWidths.set(baseFont, ctx.measureText(testString).width);
+  }
+
+  const available: string[] = [];
+
+  for (const font of testFonts) {
+    let isAvailable = false;
+
+    // Test against each baseline font
+    for (const baseFont of baseFonts) {
+      ctx.font = `${testSize} "${font}", ${baseFont}`;
+      const width = ctx.measureText(testString).width;
+
+      // If width differs from baseline, the font is available
+      if (width !== baseWidths.get(baseFont)) {
+        isAvailable = true;
+        break;
+      }
+    }
+
+    if (isAvailable) {
+      available.push(font);
+    }
+  }
+
+  return available;
+}
+
+// Detect available fonts on page load
+const AVAILABLE_FONTS = detectAvailableFonts(COMMON_FONTS);
 
 let painter: Painter | null = null;
 let currentBitmap: ImageBitmap | null = null;
@@ -36,24 +131,6 @@ const progressBar = document.getElementById('progressBar') as HTMLDivElement;
 const progressText = document.getElementById('progressText') as HTMLSpanElement;
 const statusText = document.getElementById('statusText') as HTMLSpanElement;
 const placeholder = document.getElementById('placeholder') as HTMLDivElement;
-const fontGrid = document.getElementById('fontGrid') as HTMLDivElement;
-
-// Build font checkboxes
-FONTS.forEach((font, i) => {
-  const label = document.createElement('label');
-  label.className = 'font-label';
-  const cb = document.createElement('input');
-  cb.type = 'checkbox';
-  cb.name = 'font';
-  cb.value = font;
-  cb.checked = i < 3; // Arial, Georgia, Courier New checked by default
-  const span = document.createElement('span');
-  span.textContent = font;
-  span.style.fontFamily = font;
-  label.appendChild(cb);
-  label.appendChild(span);
-  fontGrid.appendChild(label);
-});
 
 // Range label sync
 function bindRange(
@@ -77,10 +154,8 @@ bindRange('threshold', 'thresholdVal', (v) => (v / 100).toFixed(2));
 bindRange('batchSize', 'batchSizeVal');
 
 function getSelectedFonts(): string[] {
-  const checked = Array.from(
-    document.querySelectorAll<HTMLInputElement>('input[name="font"]:checked'),
-  ).map((cb) => cb.value);
-  return checked.length > 0 ? checked : ['Arial'];
+  // Return all detected fonts, or fallback to Arial if none detected
+  return AVAILABLE_FONTS.length > 0 ? AVAILABLE_FONTS : ['Arial'];
 }
 
 function setProgress(coverage: number) {
@@ -141,9 +216,11 @@ startBtn.addEventListener('click', () => {
     ? parseInt(seedInput.value, 10)
     : Math.floor(Math.random() * 0xffffffff);
 
+  const selectedFonts = getSelectedFonts();
+
   const config: PainterConfig = {
     phrase,
-    fonts: getSelectedFonts(),
+    fonts: selectedFonts,
     minSize: parseInt(minSizeInput.value, 10),
     maxSize: parseInt(maxSizeInput.value, 10),
     maxRotation: parseFloat(maxRotationInput.value),
