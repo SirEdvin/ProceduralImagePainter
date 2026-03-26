@@ -127,10 +127,28 @@ const startBtn = document.getElementById('startBtn') as HTMLButtonElement;
 const stopBtn = document.getElementById('stopBtn') as HTMLButtonElement;
 const downloadPngBtn = document.getElementById('downloadPngBtn') as HTMLButtonElement;
 const downloadGifBtn = document.getElementById('downloadGifBtn') as HTMLButtonElement;
+const shareTwitterBtn = document.getElementById('shareTwitterBtn') as HTMLButtonElement;
+const shareFacebookBtn = document.getElementById('shareFacebookBtn') as HTMLButtonElement;
+const shareMastodonBtn = document.getElementById('shareMastodonBtn') as HTMLButtonElement;
+const includeLinkCheck = document.getElementById('includeLinkCheck') as HTMLInputElement;
+const mastodonInstanceInput = document.getElementById('mastodonInstance') as HTMLInputElement;
 const progressBar = document.getElementById('progressBar') as HTMLDivElement;
 const progressText = document.getElementById('progressText') as HTMLSpanElement;
 const statusText = document.getElementById('statusText') as HTMLSpanElement;
 const placeholder = document.getElementById('placeholder') as HTMLDivElement;
+
+const PROJECT_URL = 'https://siredvin.github.io/ProceduralImagePainter/';
+const SHARE_TEXT = 'I created typographic halftone art using Procedural Image Painter!';
+
+function openShareWindow(url: string) {
+  window.open(url, '_blank', 'noopener,noreferrer,width=600,height=500');
+}
+
+function enableShareButtons() {
+  shareTwitterBtn.disabled = false;
+  shareFacebookBtn.disabled = false;
+  shareMastodonBtn.disabled = false;
+}
 
 // Range label sync
 function bindRange(
@@ -248,6 +266,7 @@ startBtn.addEventListener('click', () => {
       stopBtn.disabled = true;
       downloadPngBtn.disabled = false;
       downloadGifBtn.disabled = painter!.frames.length === 0;
+      enableShareButtons();
     },
   });
 
@@ -269,6 +288,7 @@ stopBtn.addEventListener('click', () => {
   setStatus('Stopped.');
   downloadPngBtn.disabled = false;
   downloadGifBtn.disabled = !painter || painter.frames.length === 0;
+  enableShareButtons();
 });
 
 // Download PNG
@@ -318,4 +338,27 @@ downloadGifBtn.addEventListener('click', async () => {
 
   downloadGifBtn.disabled = false;
   downloadGifBtn.textContent = origText;
+});
+
+// Share on Twitter / X
+shareTwitterBtn.addEventListener('click', () => {
+  const params = new URLSearchParams({ text: SHARE_TEXT });
+  if (includeLinkCheck.checked) params.set('url', PROJECT_URL);
+  openShareWindow(`https://twitter.com/intent/tweet?${params}`);
+});
+
+// Share on Facebook
+shareFacebookBtn.addEventListener('click', () => {
+  const params = new URLSearchParams({ quote: SHARE_TEXT });
+  if (includeLinkCheck.checked) params.set('u', PROJECT_URL);
+  openShareWindow(`https://www.facebook.com/sharer/sharer.php?${params}`);
+});
+
+// Share on Mastodon
+shareMastodonBtn.addEventListener('click', () => {
+  const rawInstance = mastodonInstanceInput.value.trim() || 'mastodon.social';
+  const instance = rawInstance.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const text = includeLinkCheck.checked ? `${SHARE_TEXT} ${PROJECT_URL}` : SHARE_TEXT;
+  const params = new URLSearchParams({ text });
+  openShareWindow(`https://${instance}/share?${params}`);
 });
