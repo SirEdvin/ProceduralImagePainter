@@ -364,21 +364,32 @@ input[type="range"]::-webkit-slider-thumb:hover {
   width: auto;
 }
 
-.mastodon-row {
+.share-row {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
   gap: 8px;
 }
 
-.mastodon-row label {
+.share-row label {
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
 }
 
-.mastodon-row input {
+.share-row input {
   min-width: 0;
+}
+
+.api-key-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-decoration: none;
+  margin-top: -4px;
+}
+
+.api-key-hint:hover {
+  color: var(--accent);
 }
 
 /* Responsive */

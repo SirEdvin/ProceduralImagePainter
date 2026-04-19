@@ -131,6 +131,7 @@ const shareTwitterBtn = document.getElementById('shareTwitterBtn') as HTMLButton
 const shareFacebookBtn = document.getElementById('shareFacebookBtn') as HTMLButtonElement;
 const shareMastodonBtn = document.getElementById('shareMastodonBtn') as HTMLButtonElement;
 const includeLinkCheck = document.getElementById('includeLinkCheck') as HTMLInputElement;
+const imgbbApiKeyInput = document.getElementById('imgbbApiKey') as HTMLInputElement;
 const mastodonInstanceInput = document.getElementById('mastodonInstance') as HTMLInputElement;
 const progressBar = document.getElementById('progressBar') as HTMLDivElement;
 const progressText = document.getElementById('progressText') as HTMLSpanElement;
@@ -148,6 +149,34 @@ function enableShareButtons() {
   shareTwitterBtn.disabled = false;
   shareFacebookBtn.disabled = false;
   shareMastodonBtn.disabled = false;
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function uploadToImgbb(): Promise<string | null> {
+  const apiKey = imgbbApiKeyInput.value.trim();
+  if (!apiKey) return null;
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) return null;
+  const base64 = await blobToBase64(blob);
+  const form = new FormData();
+  form.append('key', apiKey);
+  form.append('image', base64.split(',')[1]);
+  try {
+    const res = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return (json?.data?.url_viewer as string) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // Range label sync
@@ -340,25 +369,46 @@ downloadGifBtn.addEventListener('click', async () => {
   downloadGifBtn.textContent = origText;
 });
 
+function withUploadState(btn: HTMLButtonElement, fn: () => Promise<void>) {
+  return async () => {
+    const orig = btn.textContent!;
+    btn.disabled = true;
+    if (imgbbApiKeyInput.value.trim()) btn.textContent = 'Uploading…';
+    try { await fn(); } finally {
+      btn.disabled = false;
+      btn.textContent = orig;
+    }
+  };
+}
+
 // Share on Twitter / X
-shareTwitterBtn.addEventListener('click', () => {
-  const params = new URLSearchParams({ text: SHARE_TEXT });
-  if (includeLinkCheck.checked) params.set('url', PROJECT_URL);
+shareTwitterBtn.addEventListener('click', withUploadState(shareTwitterBtn, async () => {
+  const imgbbUrl = await uploadToImgbb();
+  const tweetText = imgbbUrl && includeLinkCheck.checked
+    ? `${SHARE_TEXT} ${PROJECT_URL}`
+    : SHARE_TEXT;
+  const params = new URLSearchParams({ text: tweetText });
+  const shareUrl = imgbbUrl ?? (includeLinkCheck.checked ? PROJECT_URL : '');
+  if (shareUrl) params.set('url', shareUrl);
   openShareWindow(`https://twitter.com/intent/tweet?${params}`);
-});
+}));
 
 // Share on Facebook
-shareFacebookBtn.addEventListener('click', () => {
+shareFacebookBtn.addEventListener('click', withUploadState(shareFacebookBtn, async () => {
+  const imgbbUrl = await uploadToImgbb();
   const params = new URLSearchParams({ quote: SHARE_TEXT });
-  if (includeLinkCheck.checked) params.set('u', PROJECT_URL);
+  const shareUrl = imgbbUrl ?? (includeLinkCheck.checked ? PROJECT_URL : '');
+  if (shareUrl) params.set('u', shareUrl);
   openShareWindow(`https://www.facebook.com/sharer/sharer.php?${params}`);
-});
+}));
 
 // Share on Mastodon
-shareMastodonBtn.addEventListener('click', () => {
+shareMastodonBtn.addEventListener('click', withUploadState(shareMastodonBtn, async () => {
+  const imgbbUrl = await uploadToImgbb();
   const rawInstance = mastodonInstanceInput.value.trim() || 'mastodon.social';
   const instance = rawInstance.replace(/^https?:\/\//, '').replace(/\/$/, '');
-  const text = includeLinkCheck.checked ? `${SHARE_TEXT} ${PROJECT_URL}` : SHARE_TEXT;
-  const params = new URLSearchParams({ text });
-  openShareWindow(`https://${instance}/share?${params}`);
-});
+  let text = SHARE_TEXT;
+  if (imgbbUrl) text += ` ${imgbbUrl}`;
+  if (includeLinkCheck.checked) text += ` ${PROJECT_URL}`;
+  openShareWindow(`https://${instance}/share?${new URLSearchParams({ text })}`);
+}));
