@@ -107,6 +107,19 @@ function detectAvailableFonts(testFonts: string[]): string[] {
 // Detect available fonts on page load
 const AVAILABLE_FONTS = detectAvailableFonts(COMMON_FONTS);
 
+// Theme
+const themeToggleBtn = document.getElementById('themeToggle') as HTMLButtonElement;
+const savedTheme = localStorage.getItem('theme') ?? 'dark';
+document.documentElement.dataset.theme = savedTheme === 'light' ? 'light' : 'dark';
+themeToggleBtn.textContent = savedTheme === 'light' ? '🌙' : '☀️';
+
+themeToggleBtn.addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = next;
+  themeToggleBtn.textContent = next === 'light' ? '🌙' : '☀️';
+  localStorage.setItem('theme', next);
+});
+
 let painter: Painter | null = null;
 let currentBitmap: ImageBitmap | null = null;
 

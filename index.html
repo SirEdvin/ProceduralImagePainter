@@ -11,6 +11,7 @@
     <header>
       <h1>Procedural Image Painter</h1>
       <p class="subtitle">Typographic halftone art — your phrase, painted over an image</p>
+      <button id="themeToggle" class="theme-toggle" title="Toggle light/dark theme">☀️</button>
     </header>
 
     <main>
@@ -122,6 +123,9 @@
     </main>
   </div>
 
+  <script>
+    (function(){var t=localStorage.getItem('theme');if(t==='light')document.documentElement.dataset.theme='light';})();
+  </script>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
