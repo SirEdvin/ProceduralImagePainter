@@ -12,6 +12,7 @@
     "vite": "^5.2.0"
   },
   "dependencies": {
+    "aws4fetch": "^1.0.20",
     "gifenc": "^1.0.1"
   }
 }

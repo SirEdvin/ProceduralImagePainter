@@ -11,10 +11,13 @@
     <header>
       <h1>Procedural Image Painter</h1>
       <p class="subtitle">Typographic halftone art — your phrase, painted over an image</p>
-      <button id="themeToggle" class="theme-toggle" title="Toggle light/dark theme">☀️</button>
+      <div class="header-actions">
+        <a href="#/settings" id="settingsLink" class="icon-btn" title="Settings">⚙</a>
+        <button id="themeToggle" class="icon-btn" title="Toggle light/dark theme">☀️</button>
+      </div>
     </header>
 
-    <main>
+    <main id="mainView">
       <section class="controls-panel">
         <div class="control-group">
           <label for="imageInput">Source Image</label>
@@ -22,6 +25,7 @@
           <div class="preview-wrap">
             <img id="imagePreview" alt="Preview" />
           </div>
+          <div class="recent-images" id="recentImages"></div>
         </div>
 
         <div class="control-group">
@@ -96,31 +100,100 @@
           <button id="downloadGifBtn" class="btn" disabled>Download GIF</button>
         </div>
 
-        <div class="share-section">
-          <div class="share-header">
-            <span class="share-label">Share</span>
-            <label class="include-link-label">
-              <input type="checkbox" id="includeLinkCheck" checked />
-              Include project link
-            </label>
-          </div>
-          <div class="share-row">
-            <label for="imgbbApiKey">imgbb API key</label>
-            <input type="text" id="imgbbApiKey" placeholder="Paste key to upload image" autocomplete="off" />
-          </div>
-          <a class="api-key-hint" href="https://api.imgbb.com/" target="_blank" rel="noopener noreferrer">Get a free key at api.imgbb.com</a>
-          <div class="share-row">
-            <label for="mastodonInstance">Mastodon instance</label>
-            <input type="text" id="mastodonInstance" value="mastodon.social" placeholder="mastodon.social" />
-          </div>
-          <div class="btn-row">
-            <button id="shareTwitterBtn" class="btn" disabled>&#x1D54F; Twitter</button>
-            <button id="shareFacebookBtn" class="btn" disabled>Facebook</button>
-            <button id="shareMastodonBtn" class="btn" disabled>Mastodon</button>
-          </div>
-        </div>
+        <div class="upload-status" id="uploadStatus"></div>
       </section>
     </main>
+
+    <section id="settingsView" class="settings-view" hidden>
+      <div class="settings-header">
+        <a href="#/" class="btn back-btn">← Back</a>
+        <h2>Settings</h2>
+      </div>
+
+      <p class="settings-intro">
+        Credentials are stored in your browser's local storage on this device only. They are sent
+        directly from your browser to the configured cloud provider — never to any other server.
+        For uploads to succeed, the destination bucket must allow CORS PUT requests from this origin.
+      </p>
+
+      <div class="settings-section" id="s3Section">
+        <div class="settings-section-header">
+          <h3>Amazon S3</h3>
+          <label class="switch">
+            <input type="checkbox" id="s3Enabled" />
+            <span>Enabled</span>
+          </label>
+        </div>
+        <div class="settings-grid">
+          <label>
+            <span>Access Key ID</span>
+            <input type="text" id="s3AccessKeyId" autocomplete="off" />
+          </label>
+          <label>
+            <span>Secret Access Key</span>
+            <input type="password" id="s3SecretAccessKey" autocomplete="off" />
+          </label>
+          <label>
+            <span>Region</span>
+            <input type="text" id="s3Region" placeholder="us-east-1" autocomplete="off" />
+          </label>
+          <label>
+            <span>Bucket</span>
+            <input type="text" id="s3Bucket" autocomplete="off" />
+          </label>
+          <label>
+            <span>Path Prefix (optional)</span>
+            <input type="text" id="s3PathPrefix" placeholder="gifs/" autocomplete="off" />
+          </label>
+          <label>
+            <span>Public URL Base (optional)</span>
+            <input type="text" id="s3PublicUrlBase" placeholder="https://cdn.example.com" autocomplete="off" />
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-section" id="r2Section">
+        <div class="settings-section-header">
+          <h3>Cloudflare R2</h3>
+          <label class="switch">
+            <input type="checkbox" id="r2Enabled" />
+            <span>Enabled</span>
+          </label>
+        </div>
+        <div class="settings-grid">
+          <label>
+            <span>Account ID</span>
+            <input type="text" id="r2AccountId" autocomplete="off" />
+          </label>
+          <label>
+            <span>Access Key ID</span>
+            <input type="text" id="r2AccessKeyId" autocomplete="off" />
+          </label>
+          <label>
+            <span>Secret Access Key</span>
+            <input type="password" id="r2SecretAccessKey" autocomplete="off" />
+          </label>
+          <label>
+            <span>Bucket</span>
+            <input type="text" id="r2Bucket" autocomplete="off" />
+          </label>
+          <label>
+            <span>Path Prefix (optional)</span>
+            <input type="text" id="r2PathPrefix" placeholder="gifs/" autocomplete="off" />
+          </label>
+          <label>
+            <span>Public URL Base (optional)</span>
+            <input type="text" id="r2PublicUrlBase" placeholder="https://pub-xxxxx.r2.dev" autocomplete="off" />
+          </label>
+        </div>
+      </div>
+
+      <div class="btn-row settings-actions">
+        <button id="settingsSaveBtn" class="btn primary">Save</button>
+        <button id="settingsClearBtn" class="btn">Clear all</button>
+      </div>
+      <div class="settings-status" id="settingsStatus"></div>
+    </section>
   </div>
 
   <script>
