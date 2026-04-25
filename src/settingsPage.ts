@@ -15,6 +15,7 @@ interface SettingsForm {
   r2Bucket: HTMLInputElement;
   r2PathPrefix: HTMLInputElement;
   r2PublicUrlBase: HTMLInputElement;
+  recentImagesInCloud: HTMLInputElement;
   saveBtn: HTMLButtonElement;
   clearBtn: HTMLButtonElement;
   status: HTMLDivElement;
@@ -37,6 +38,7 @@ function getForm(): SettingsForm {
     r2Bucket: get<HTMLInputElement>('r2Bucket'),
     r2PathPrefix: get<HTMLInputElement>('r2PathPrefix'),
     r2PublicUrlBase: get<HTMLInputElement>('r2PublicUrlBase'),
+    recentImagesInCloud: get<HTMLInputElement>('recentImagesInCloud'),
     saveBtn: get<HTMLButtonElement>('settingsSaveBtn'),
     clearBtn: get<HTMLButtonElement>('settingsClearBtn'),
     status: get<HTMLDivElement>('settingsStatus'),
@@ -58,6 +60,7 @@ function fillForm(f: SettingsForm, s: CloudSettings): void {
   f.r2Bucket.value = s.r2.bucket;
   f.r2PathPrefix.value = s.r2.pathPrefix;
   f.r2PublicUrlBase.value = s.r2.publicUrlBase;
+  f.recentImagesInCloud.checked = s.recentImagesInCloud;
 }
 
 function readForm(f: SettingsForm): CloudSettings {
@@ -80,6 +83,7 @@ function readForm(f: SettingsForm): CloudSettings {
       pathPrefix: f.r2PathPrefix.value.trim(),
       publicUrlBase: f.r2PublicUrlBase.value.trim(),
     },
+    recentImagesInCloud: f.recentImagesInCloud.checked,
   };
 }
 

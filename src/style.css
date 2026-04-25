@@ -282,6 +282,24 @@ input[type="range"]::-webkit-slider-thumb:hover {
   display: flex;
 }
 
+.recent-badge {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  pointer-events: none;
+}
+
+.recent-image.cloud {
+  border-color: var(--accent);
+}
+
 /* Buttons */
 .btn-row {
   display: flex;
@@ -528,6 +546,25 @@ input[type="range"]::-webkit-slider-thumb:hover {
   cursor: pointer;
   width: 16px;
   height: 16px;
+}
+
+.switch.wide {
+  align-items: flex-start;
+  line-height: 1.4;
+}
+
+.settings-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.settings-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--surface2);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 11px;
 }
 
 .settings-grid {

@@ -188,6 +188,22 @@
         </div>
       </div>
 
+      <div class="settings-section">
+        <div class="settings-section-header">
+          <h3>Recent Template Images</h3>
+        </div>
+        <label class="switch wide">
+          <input type="checkbox" id="recentImagesInCloud" />
+          <span>Store recent template images in cloud storage instead of this browser</span>
+        </label>
+        <p class="settings-hint">
+          When enabled, uploaded template images are saved to the first enabled provider above
+          (S3 takes priority over R2). The bucket must allow CORS for <code>PUT</code>,
+          <code>GET</code> and <code>DELETE</code> from this origin. Thumbnails stay in
+          local storage so the picker stays fast.
+        </p>
+      </div>
+
       <div class="btn-row settings-actions">
         <button id="settingsSaveBtn" class="btn primary">Save</button>
         <button id="settingsClearBtn" class="btn">Clear all</button>

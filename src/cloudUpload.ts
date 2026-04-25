@@ -1,14 +1,22 @@
 import { AwsClient } from 'aws4fetch';
 import type { CloudSettings, R2Settings, S3Settings } from './settings';
 
+export type Provider = 's3' | 'r2';
+
 export interface UploadResult {
-  provider: 's3' | 'r2';
+  provider: Provider;
   url: string;
 }
 
 export interface UploadFailure {
-  provider: 's3' | 'r2';
+  provider: Provider;
   error: string;
+}
+
+export interface CloudObjectRef {
+  provider: Provider;
+  key: string;
+  url: string;
 }
 
 function joinKey(prefix: string, filename: string): string {
@@ -22,8 +30,55 @@ function publicUrl(base: string, key: string, fallback: string): string {
   return `${trimmed}/${key}`;
 }
 
-async function blobBody(blob: Blob): Promise<ArrayBuffer> {
-  return await blob.arrayBuffer();
+function s3Endpoint(s: S3Settings, key: string): string {
+  return `https://${s.bucket}.s3.${s.region}.amazonaws.com/${encodeURI(key)}`;
+}
+
+function r2Endpoint(r: R2Settings, key: string): string {
+  return `https://${r.accountId}.r2.cloudflarestorage.com/${r.bucket}/${encodeURI(key)}`;
+}
+
+function s3Client(s: S3Settings): AwsClient {
+  return new AwsClient({
+    accessKeyId: s.accessKeyId,
+    secretAccessKey: s.secretAccessKey,
+    region: s.region,
+    service: 's3',
+  });
+}
+
+function r2Client(r: R2Settings): AwsClient {
+  return new AwsClient({
+    accessKeyId: r.accessKeyId,
+    secretAccessKey: r.secretAccessKey,
+    region: 'auto',
+    service: 's3',
+  });
+}
+
+function clientForProvider(provider: Provider, settings: CloudSettings): { client: AwsClient; endpoint: (key: string) => string; publicBase: string } {
+  if (provider === 's3') {
+    if (!settings.s3.accessKeyId || !settings.s3.secretAccessKey || !settings.s3.region || !settings.s3.bucket) {
+      throw new Error('S3 settings are incomplete');
+    }
+    return {
+      client: s3Client(settings.s3),
+      endpoint: (k) => s3Endpoint(settings.s3, k),
+      publicBase: settings.s3.publicUrlBase,
+    };
+  }
+  if (!settings.r2.accountId || !settings.r2.accessKeyId || !settings.r2.secretAccessKey || !settings.r2.bucket) {
+    throw new Error('R2 settings are incomplete');
+  }
+  return {
+    client: r2Client(settings.r2),
+    endpoint: (k) => r2Endpoint(settings.r2, k),
+    publicBase: settings.r2.publicUrlBase,
+  };
+}
+
+function prefixForProvider(provider: Provider, settings: CloudSettings): string {
+  return provider === 's3' ? settings.s3.pathPrefix : settings.r2.pathPrefix;
 }
 
 export async function uploadToS3(
@@ -35,16 +90,10 @@ export async function uploadToS3(
   if (!s.accessKeyId || !s.secretAccessKey || !s.region || !s.bucket) {
     throw new Error('S3 settings are incomplete');
   }
-  const client = new AwsClient({
-    accessKeyId: s.accessKeyId,
-    secretAccessKey: s.secretAccessKey,
-    region: s.region,
-    service: 's3',
-  });
   const key = joinKey(s.pathPrefix, filename);
-  const endpoint = `https://${s.bucket}.s3.${s.region}.amazonaws.com/${encodeURI(key)}`;
-  const body = await blobBody(blob);
-  const res = await client.fetch(endpoint, {
+  const endpoint = s3Endpoint(s, key);
+  const body = await blob.arrayBuffer();
+  const res = await s3Client(s).fetch(endpoint, {
     method: 'PUT',
     body,
     headers: { 'Content-Type': contentType },
@@ -65,16 +114,10 @@ export async function uploadToR2(
   if (!r.accountId || !r.accessKeyId || !r.secretAccessKey || !r.bucket) {
     throw new Error('R2 settings are incomplete');
   }
-  const client = new AwsClient({
-    accessKeyId: r.accessKeyId,
-    secretAccessKey: r.secretAccessKey,
-    region: 'auto',
-    service: 's3',
-  });
   const key = joinKey(r.pathPrefix, filename);
-  const endpoint = `https://${r.accountId}.r2.cloudflarestorage.com/${r.bucket}/${encodeURI(key)}`;
-  const body = await blobBody(blob);
-  const res = await client.fetch(endpoint, {
+  const endpoint = r2Endpoint(r, key);
+  const body = await blob.arrayBuffer();
+  const res = await r2Client(r).fetch(endpoint, {
     method: 'PUT',
     body,
     headers: { 'Content-Type': contentType },
@@ -115,4 +158,54 @@ export async function uploadToAllEnabled(
     else failures.push(item);
   }
   return { results, failures };
+}
+
+export async function uploadToProvider(
+  provider: Provider,
+  blob: Blob,
+  filename: string,
+  contentType: string,
+  settings: CloudSettings,
+): Promise<CloudObjectRef> {
+  const { client, endpoint, publicBase } = clientForProvider(provider, settings);
+  const key = joinKey(prefixForProvider(provider, settings), filename);
+  const ep = endpoint(key);
+  const body = await blob.arrayBuffer();
+  const res = await client.fetch(ep, {
+    method: 'PUT',
+    body,
+    headers: { 'Content-Type': contentType },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`${provider.toUpperCase()} upload failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+  return { provider, key, url: publicUrl(publicBase, key, ep) };
+}
+
+export async function downloadFromCloud(
+  provider: Provider,
+  key: string,
+  settings: CloudSettings,
+): Promise<Blob> {
+  const { client, endpoint } = clientForProvider(provider, settings);
+  const res = await client.fetch(endpoint(key), { method: 'GET' });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`${provider.toUpperCase()} download failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+  return await res.blob();
+}
+
+export async function deleteFromCloud(
+  provider: Provider,
+  key: string,
+  settings: CloudSettings,
+): Promise<void> {
+  const { client, endpoint } = clientForProvider(provider, settings);
+  const res = await client.fetch(endpoint(key), { method: 'DELETE' });
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`${provider.toUpperCase()} delete failed (${res.status}): ${text.slice(0, 200)}`);
+  }
 }

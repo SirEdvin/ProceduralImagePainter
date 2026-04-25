@@ -21,6 +21,7 @@ export interface R2Settings {
 export interface CloudSettings {
   s3: S3Settings;
   r2: R2Settings;
+  recentImagesInCloud: boolean;
 }
 
 const STORAGE_KEY = 'cloudStorageSettings';
@@ -45,6 +46,7 @@ function defaultSettings(): CloudSettings {
       pathPrefix: '',
       publicUrlBase: '',
     },
+    recentImagesInCloud: false,
   };
 }
 
@@ -57,6 +59,7 @@ export function loadSettings(): CloudSettings {
     return {
       s3: { ...base.s3, ...(parsed.s3 ?? {}) },
       r2: { ...base.r2, ...(parsed.r2 ?? {}) },
+      recentImagesInCloud: parsed.recentImagesInCloud ?? base.recentImagesInCloud,
     };
   } catch {
     return defaultSettings();
@@ -73,4 +76,10 @@ export function clearSettings(): void {
 
 export function hasAnyEnabled(settings: CloudSettings): boolean {
   return settings.s3.enabled || settings.r2.enabled;
+}
+
+export function primaryProvider(settings: CloudSettings): 's3' | 'r2' | null {
+  if (settings.s3.enabled) return 's3';
+  if (settings.r2.enabled) return 'r2';
+  return null;
 }

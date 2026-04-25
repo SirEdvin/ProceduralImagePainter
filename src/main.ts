@@ -1,7 +1,12 @@
 import { Painter, type PainterConfig } from './painter';
 import { GIFEncoder, quantize, applyPalette } from 'gifenc';
-import { loadSettings, hasAnyEnabled } from './settings';
-import { uploadToAllEnabled } from './cloudUpload';
+import { loadSettings, hasAnyEnabled, primaryProvider } from './settings';
+import {
+  deleteFromCloud,
+  downloadFromCloud,
+  uploadToAllEnabled,
+  uploadToProvider,
+} from './cloudUpload';
 import {
   addRecentImage,
   deleteRecentImage,
@@ -9,6 +14,13 @@ import {
   listRecentImages,
   type RecentImage,
 } from './recentImages';
+import {
+  addCloudRecentImage,
+  getCloudRecentImage,
+  listCloudRecentImages,
+  removeCloudRecentImage,
+  type CloudRecentImage,
+} from './cloudRecentImages';
 import { initSettingsPage } from './settingsPage';
 
 // Comprehensive list of common web fonts to test for availability
@@ -215,29 +227,67 @@ async function loadBitmapFromBlob(blob: Blob, previewUrl?: string) {
   currentBitmap = await createImageBitmap(blob);
 }
 
-// Recent images strip
+// Recent images strip — entries can live in IndexedDB (local) or in the cloud bucket
+type RecentEntry =
+  | { source: 'local'; data: RecentImage }
+  | { source: 'cloud'; data: CloudRecentImage };
+
+async function makeThumbnail(blob: Blob): Promise<string> {
+  const bmp = await createImageBitmap(blob);
+  const max = 96;
+  const ratio = Math.min(max / bmp.width, max / bmp.height, 1);
+  const w = Math.max(1, Math.round(bmp.width * ratio));
+  const h = Math.max(1, Math.round(bmp.height * ratio));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  c.getContext('2d')!.drawImage(bmp, 0, 0, w, h);
+  bmp.close();
+  return c.toDataURL('image/jpeg', 0.7);
+}
+
+async function listAllRecentEntries(): Promise<RecentEntry[]> {
+  const [local, cloud] = await Promise.all([listRecentImages(), Promise.resolve(listCloudRecentImages())]);
+  const entries: RecentEntry[] = [
+    ...local.map((data) => ({ source: 'local', data }) as RecentEntry),
+    ...cloud.map((data) => ({ source: 'cloud', data }) as RecentEntry),
+  ];
+  entries.sort((a, b) => b.data.addedAt - a.data.addedAt);
+  return entries;
+}
+
 async function renderRecentImages() {
-  const items = await listRecentImages();
+  const entries = await listAllRecentEntries();
   recentImagesEl.innerHTML = '';
-  if (items.length === 0) {
+  if (entries.length === 0) {
     recentImagesEl.style.display = 'none';
     return;
   }
   recentImagesEl.style.display = 'flex';
-  for (const item of items) {
-    recentImagesEl.appendChild(createRecentImageEl(item));
+  for (const entry of entries) {
+    recentImagesEl.appendChild(createRecentEntryEl(entry));
   }
 }
 
-function createRecentImageEl(item: RecentImage): HTMLElement {
+function createRecentEntryEl(entry: RecentEntry): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'recent-image';
-  wrap.title = item.name;
+  if (entry.source === 'cloud') wrap.classList.add('cloud');
+  wrap.title = entry.source === 'cloud'
+    ? `${entry.data.name} (${entry.data.provider.toUpperCase()})`
+    : entry.data.name;
 
   const img = document.createElement('img');
-  img.src = item.thumbnail;
-  img.alt = item.name;
+  img.src = entry.data.thumbnail;
+  img.alt = entry.data.name;
   wrap.appendChild(img);
+
+  if (entry.source === 'cloud') {
+    const badge = document.createElement('span');
+    badge.className = 'recent-badge';
+    badge.textContent = entry.data.provider.toUpperCase();
+    wrap.appendChild(badge);
+  }
 
   const remove = document.createElement('button');
   remove.type = 'button';
@@ -246,35 +296,92 @@ function createRecentImageEl(item: RecentImage): HTMLElement {
   remove.title = 'Remove';
   remove.addEventListener('click', async (e) => {
     e.stopPropagation();
-    await deleteRecentImage(item.id);
+    await removeRecentEntry(entry);
     await renderRecentImages();
   });
   wrap.appendChild(remove);
 
-  wrap.addEventListener('click', async () => {
-    const fresh = await getRecentImage(item.id);
+  wrap.addEventListener('click', () => loadRecentEntry(entry));
+  return wrap;
+}
+
+async function removeRecentEntry(entry: RecentEntry): Promise<void> {
+  if (entry.source === 'local') {
+    await deleteRecentImage(entry.data.id);
+    return;
+  }
+  const removed = removeCloudRecentImage(entry.data.id);
+  if (!removed) return;
+  try {
+    await deleteFromCloud(removed.provider, removed.key, loadSettings());
+  } catch (e) {
+    console.warn('Failed to delete cloud recent image', e);
+  }
+}
+
+async function loadRecentEntry(entry: RecentEntry): Promise<void> {
+  if (entry.source === 'local') {
+    const fresh = await getRecentImage(entry.data.id);
     if (!fresh) return;
     await loadBitmapFromBlob(fresh.blob, fresh.thumbnail);
     setStatus(`Loaded "${fresh.name}"`);
-  });
-
-  return wrap;
+    return;
+  }
+  const meta = getCloudRecentImage(entry.data.id);
+  if (!meta) return;
+  setStatus(`Fetching "${meta.name}" from ${meta.provider.toUpperCase()}…`);
+  try {
+    const blob = await downloadFromCloud(meta.provider, meta.key, loadSettings());
+    await loadBitmapFromBlob(blob, meta.thumbnail);
+    setStatus(`Loaded "${meta.name}"`);
+  } catch (e) {
+    setStatus(`Failed to load: ${(e as Error).message}`);
+  }
 }
 
 renderRecentImages();
 
-// Image upload
+// Image upload — destination depends on the cloud-storage toggle
 imageInput.addEventListener('change', async () => {
   const file = imageInput.files?.[0];
   if (!file) return;
 
   await loadBitmapFromBlob(file);
-  try {
-    await addRecentImage(file);
-    await renderRecentImages();
-  } catch (e) {
-    console.warn('Failed to save recent image', e);
+
+  const settings = loadSettings();
+  const provider = settings.recentImagesInCloud ? primaryProvider(settings) : null;
+
+  if (provider) {
+    try {
+      const thumbnail = await makeThumbnail(file);
+      const filename = `template-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      setStatus(`Uploading template to ${provider.toUpperCase()}…`);
+      const ref = await uploadToProvider(provider, file, filename, file.type || 'image/png', settings);
+      const { evicted } = addCloudRecentImage({
+        provider: ref.provider,
+        key: ref.key,
+        url: ref.url,
+        name: file.name,
+        type: file.type || 'image/png',
+        thumbnail,
+      });
+      for (const e of evicted) {
+        try { await deleteFromCloud(e.provider, e.key, settings); } catch { /* best-effort */ }
+      }
+      setStatus(`Template stored on ${provider.toUpperCase()}`);
+    } catch (e) {
+      setStatus(`Cloud upload failed, falling back to local: ${(e as Error).message}`);
+      try { await addRecentImage(file); } catch (err) { console.warn('Failed to save recent image', err); }
+    }
+  } else {
+    try {
+      await addRecentImage(file);
+    } catch (e) {
+      console.warn('Failed to save recent image', e);
+    }
   }
+
+  await renderRecentImages();
 });
 
 // Start
