@@ -1,5 +1,27 @@
 import { Painter, type PainterConfig } from './painter';
 import { GIFEncoder, quantize, applyPalette } from 'gifenc';
+import { loadSettings, hasAnyEnabled, primaryProvider } from './settings';
+import {
+  deleteFromCloud,
+  downloadFromCloud,
+  uploadToAllEnabled,
+  uploadToProvider,
+} from './cloudUpload';
+import {
+  addRecentImage,
+  deleteRecentImage,
+  getRecentImage,
+  listRecentImages,
+  type RecentImage,
+} from './recentImages';
+import {
+  addCloudRecentImage,
+  getCloudRecentImage,
+  listCloudRecentImages,
+  removeCloudRecentImage,
+  type CloudRecentImage,
+} from './cloudRecentImages';
+import { initSettingsPage } from './settingsPage';
 
 // Comprehensive list of common web fonts to test for availability
 const COMMON_FONTS = [
@@ -67,12 +89,10 @@ function detectAvailableFonts(testFonts: string[]): string[] {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
 
-  // Baseline fonts that should always be different
   const baseFonts = ['monospace', 'sans-serif', 'serif'];
   const testString = 'mmmmmmmmmmlli';
   const testSize = '72px';
 
-  // Measure baseline widths
   const baseWidths = new Map<string, number>();
   for (const baseFont of baseFonts) {
     ctx.font = `${testSize} ${baseFont}`;
@@ -83,19 +103,14 @@ function detectAvailableFonts(testFonts: string[]): string[] {
 
   for (const font of testFonts) {
     let isAvailable = false;
-
-    // Test against each baseline font
     for (const baseFont of baseFonts) {
       ctx.font = `${testSize} "${font}", ${baseFont}`;
       const width = ctx.measureText(testString).width;
-
-      // If width differs from baseline, the font is available
       if (width !== baseWidths.get(baseFont)) {
         isAvailable = true;
         break;
       }
     }
-
     if (isAvailable) {
       available.push(font);
     }
@@ -104,7 +119,6 @@ function detectAvailableFonts(testFonts: string[]): string[] {
   return available;
 }
 
-// Detect available fonts on page load
 const AVAILABLE_FONTS = detectAvailableFonts(COMMON_FONTS);
 
 // Theme
@@ -120,11 +134,26 @@ themeToggleBtn.addEventListener('click', () => {
   localStorage.setItem('theme', next);
 });
 
+// Routing
+const mainView = document.getElementById('mainView') as HTMLElement;
+const settingsView = document.getElementById('settingsView') as HTMLElement;
+
+function applyRoute() {
+  const isSettings = window.location.hash === '#/settings';
+  mainView.hidden = isSettings;
+  settingsView.hidden = !isSettings;
+}
+
+window.addEventListener('hashchange', applyRoute);
+applyRoute();
+initSettingsPage();
+
 let painter: Painter | null = null;
 let currentBitmap: ImageBitmap | null = null;
 
 const imageInput = document.getElementById('imageInput') as HTMLInputElement;
 const imagePreview = document.getElementById('imagePreview') as HTMLImageElement;
+const recentImagesEl = document.getElementById('recentImages') as HTMLDivElement;
 const phraseInput = document.getElementById('phrase') as HTMLInputElement;
 const minSizeInput = document.getElementById('minSize') as HTMLInputElement;
 const maxSizeInput = document.getElementById('maxSize') as HTMLInputElement;
@@ -140,57 +169,11 @@ const startBtn = document.getElementById('startBtn') as HTMLButtonElement;
 const stopBtn = document.getElementById('stopBtn') as HTMLButtonElement;
 const downloadPngBtn = document.getElementById('downloadPngBtn') as HTMLButtonElement;
 const downloadGifBtn = document.getElementById('downloadGifBtn') as HTMLButtonElement;
-const shareTwitterBtn = document.getElementById('shareTwitterBtn') as HTMLButtonElement;
-const shareFacebookBtn = document.getElementById('shareFacebookBtn') as HTMLButtonElement;
-const shareMastodonBtn = document.getElementById('shareMastodonBtn') as HTMLButtonElement;
-const includeLinkCheck = document.getElementById('includeLinkCheck') as HTMLInputElement;
-const imgbbApiKeyInput = document.getElementById('imgbbApiKey') as HTMLInputElement;
-const mastodonInstanceInput = document.getElementById('mastodonInstance') as HTMLInputElement;
 const progressBar = document.getElementById('progressBar') as HTMLDivElement;
 const progressText = document.getElementById('progressText') as HTMLSpanElement;
 const statusText = document.getElementById('statusText') as HTMLSpanElement;
 const placeholder = document.getElementById('placeholder') as HTMLDivElement;
-
-const PROJECT_URL = 'https://siredvin.github.io/ProceduralImagePainter/';
-const SHARE_TEXT = 'I created typographic halftone art using Procedural Image Painter!';
-
-function openShareWindow(url: string) {
-  window.open(url, '_blank', 'noopener,noreferrer,width=600,height=500');
-}
-
-function enableShareButtons() {
-  shareTwitterBtn.disabled = false;
-  shareFacebookBtn.disabled = false;
-  shareMastodonBtn.disabled = false;
-}
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function uploadToImgbb(): Promise<string | null> {
-  const apiKey = imgbbApiKeyInput.value.trim();
-  if (!apiKey) return null;
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-  if (!blob) return null;
-  const base64 = await blobToBase64(blob);
-  const form = new FormData();
-  form.append('key', apiKey);
-  form.append('image', base64.split(',')[1]);
-  try {
-    const res = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return (json?.data?.url_viewer as string) ?? null;
-  } catch {
-    return null;
-  }
-}
+const uploadStatusEl = document.getElementById('uploadStatus') as HTMLDivElement;
 
 // Range label sync
 function bindRange(
@@ -214,7 +197,6 @@ bindRange('threshold', 'thresholdVal', (v) => (v / 100).toFixed(2));
 bindRange('batchSize', 'batchSizeVal');
 
 function getSelectedFonts(): string[] {
-  // Return all detected fonts, or fallback to Arial if none detected
   return AVAILABLE_FONTS.length > 0 ? AVAILABLE_FONTS : ['Arial'];
 }
 
@@ -233,19 +215,173 @@ function showCanvas() {
   canvas.style.display = 'block';
 }
 
-// Image upload
-imageInput.addEventListener('change', () => {
+async function loadBitmapFromBlob(blob: Blob, previewUrl?: string) {
+  if (previewUrl) {
+    imagePreview.src = previewUrl;
+  } else {
+    const url = URL.createObjectURL(blob);
+    imagePreview.src = url;
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  imagePreview.style.display = 'block';
+  currentBitmap = await createImageBitmap(blob);
+}
+
+// Recent images strip — entries can live in IndexedDB (local) or in the cloud bucket
+type RecentEntry =
+  | { source: 'local'; data: RecentImage }
+  | { source: 'cloud'; data: CloudRecentImage };
+
+async function makeThumbnail(blob: Blob): Promise<string> {
+  const bmp = await createImageBitmap(blob);
+  const max = 96;
+  const ratio = Math.min(max / bmp.width, max / bmp.height, 1);
+  const w = Math.max(1, Math.round(bmp.width * ratio));
+  const h = Math.max(1, Math.round(bmp.height * ratio));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  c.getContext('2d')!.drawImage(bmp, 0, 0, w, h);
+  bmp.close();
+  return c.toDataURL('image/jpeg', 0.7);
+}
+
+async function listAllRecentEntries(): Promise<RecentEntry[]> {
+  const [local, cloud] = await Promise.all([listRecentImages(), Promise.resolve(listCloudRecentImages())]);
+  const entries: RecentEntry[] = [
+    ...local.map((data) => ({ source: 'local', data }) as RecentEntry),
+    ...cloud.map((data) => ({ source: 'cloud', data }) as RecentEntry),
+  ];
+  entries.sort((a, b) => b.data.addedAt - a.data.addedAt);
+  return entries;
+}
+
+async function renderRecentImages() {
+  const entries = await listAllRecentEntries();
+  recentImagesEl.innerHTML = '';
+  if (entries.length === 0) {
+    recentImagesEl.style.display = 'none';
+    return;
+  }
+  recentImagesEl.style.display = 'flex';
+  for (const entry of entries) {
+    recentImagesEl.appendChild(createRecentEntryEl(entry));
+  }
+}
+
+function createRecentEntryEl(entry: RecentEntry): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'recent-image';
+  if (entry.source === 'cloud') wrap.classList.add('cloud');
+  wrap.title = entry.source === 'cloud'
+    ? `${entry.data.name} (${entry.data.provider.toUpperCase()})`
+    : entry.data.name;
+
+  const img = document.createElement('img');
+  img.src = entry.data.thumbnail;
+  img.alt = entry.data.name;
+  wrap.appendChild(img);
+
+  if (entry.source === 'cloud') {
+    const badge = document.createElement('span');
+    badge.className = 'recent-badge';
+    badge.textContent = entry.data.provider.toUpperCase();
+    wrap.appendChild(badge);
+  }
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'recent-remove';
+  remove.textContent = '×';
+  remove.title = 'Remove';
+  remove.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await removeRecentEntry(entry);
+    await renderRecentImages();
+  });
+  wrap.appendChild(remove);
+
+  wrap.addEventListener('click', () => loadRecentEntry(entry));
+  return wrap;
+}
+
+async function removeRecentEntry(entry: RecentEntry): Promise<void> {
+  if (entry.source === 'local') {
+    await deleteRecentImage(entry.data.id);
+    return;
+  }
+  const removed = removeCloudRecentImage(entry.data.id);
+  if (!removed) return;
+  try {
+    await deleteFromCloud(removed.provider, removed.key, loadSettings());
+  } catch (e) {
+    console.warn('Failed to delete cloud recent image', e);
+  }
+}
+
+async function loadRecentEntry(entry: RecentEntry): Promise<void> {
+  if (entry.source === 'local') {
+    const fresh = await getRecentImage(entry.data.id);
+    if (!fresh) return;
+    await loadBitmapFromBlob(fresh.blob, fresh.thumbnail);
+    setStatus(`Loaded "${fresh.name}"`);
+    return;
+  }
+  const meta = getCloudRecentImage(entry.data.id);
+  if (!meta) return;
+  setStatus(`Fetching "${meta.name}" from ${meta.provider.toUpperCase()}…`);
+  try {
+    const blob = await downloadFromCloud(meta.provider, meta.key, loadSettings());
+    await loadBitmapFromBlob(blob, meta.thumbnail);
+    setStatus(`Loaded "${meta.name}"`);
+  } catch (e) {
+    setStatus(`Failed to load: ${(e as Error).message}`);
+  }
+}
+
+renderRecentImages();
+
+// Image upload — destination depends on the cloud-storage toggle
+imageInput.addEventListener('change', async () => {
   const file = imageInput.files?.[0];
   if (!file) return;
 
-  const url = URL.createObjectURL(file);
-  imagePreview.src = url;
-  imagePreview.style.display = 'block';
+  await loadBitmapFromBlob(file);
 
-  createImageBitmap(file).then((bmp) => {
-    currentBitmap = bmp;
-    URL.revokeObjectURL(url);
-  });
+  const settings = loadSettings();
+  const provider = settings.recentImagesInCloud ? primaryProvider(settings) : null;
+
+  if (provider) {
+    try {
+      const thumbnail = await makeThumbnail(file);
+      const filename = `template-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      setStatus(`Uploading template to ${provider.toUpperCase()}…`);
+      const ref = await uploadToProvider(provider, file, filename, file.type || 'image/png', settings);
+      const { evicted } = addCloudRecentImage({
+        provider: ref.provider,
+        key: ref.key,
+        url: ref.url,
+        name: file.name,
+        type: file.type || 'image/png',
+        thumbnail,
+      });
+      for (const e of evicted) {
+        try { await deleteFromCloud(e.provider, e.key, settings); } catch { /* best-effort */ }
+      }
+      setStatus(`Template stored on ${provider.toUpperCase()}`);
+    } catch (e) {
+      setStatus(`Cloud upload failed, falling back to local: ${(e as Error).message}`);
+      try { await addRecentImage(file); } catch (err) { console.warn('Failed to save recent image', err); }
+    }
+  } else {
+    try {
+      await addRecentImage(file);
+    } catch (e) {
+      console.warn('Failed to save recent image', e);
+    }
+  }
+
+  await renderRecentImages();
 });
 
 // Start
@@ -268,7 +404,6 @@ startBtn.addEventListener('click', () => {
   canvas.height = height;
   showCanvas();
 
-  // Fill white while loading
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
 
@@ -308,10 +443,10 @@ startBtn.addEventListener('click', () => {
       stopBtn.disabled = true;
       downloadPngBtn.disabled = false;
       downloadGifBtn.disabled = painter!.frames.length === 0;
-      enableShareButtons();
     },
   });
 
+  uploadStatusEl.innerHTML = '';
   startBtn.disabled = true;
   stopBtn.disabled = false;
   downloadPngBtn.disabled = true;
@@ -330,7 +465,6 @@ stopBtn.addEventListener('click', () => {
   setStatus('Stopped.');
   downloadPngBtn.disabled = false;
   downloadGifBtn.disabled = !painter || painter.frames.length === 0;
-  enableShareButtons();
 });
 
 // Download PNG
@@ -346,82 +480,85 @@ downloadPngBtn.addEventListener('click', () => {
   });
 });
 
-// Download GIF
+async function encodeGif(): Promise<Blob | null> {
+  if (!painter || painter.frames.length === 0) return null;
+  const { frames, width, height } = painter;
+  const gif = GIFEncoder();
+  for (let i = 0; i < frames.length; i++) {
+    const frame = frames[i];
+    const palette = quantize(frame.data, 256);
+    const index = applyPalette(frame.data, palette);
+    gif.writeFrame(index, width, height, { palette, delay: 500, repeat: 0 });
+    if (i % 3 === 0) {
+      downloadGifBtn.textContent = `Encoding… ${Math.round(((i + 1) / frames.length) * 100)}%`;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  gif.finish();
+  const bytes = gif.bytes();
+  return new Blob([bytes.buffer as ArrayBuffer], { type: 'image/gif' });
+}
+
+function gifFilename(): string {
+  const now = new Date();
+  const stamp = now.toISOString().replace(/[:.]/g, '-').replace(/Z$/, '');
+  return `halftone-${stamp}.gif`;
+}
+
+function renderUploadStatus(
+  results: { provider: string; url: string }[],
+  failures: { provider: string; error: string }[],
+): void {
+  uploadStatusEl.innerHTML = '';
+  for (const r of results) {
+    const row = document.createElement('div');
+    row.className = 'upload-row ok';
+    const label = document.createElement('span');
+    label.textContent = `${r.provider.toUpperCase()}: `;
+    const link = document.createElement('a');
+    link.href = r.url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = r.url;
+    row.append(label, link);
+    uploadStatusEl.appendChild(row);
+  }
+  for (const f of failures) {
+    const row = document.createElement('div');
+    row.className = 'upload-row error';
+    row.textContent = `${f.provider.toUpperCase()} upload failed: ${f.error}`;
+    uploadStatusEl.appendChild(row);
+  }
+}
+
+// Download GIF (and auto-upload to enabled cloud providers)
 downloadGifBtn.addEventListener('click', async () => {
   if (!painter || painter.frames.length === 0) return;
 
   const origText = downloadGifBtn.textContent!;
   downloadGifBtn.disabled = true;
 
-  const { frames, width, height } = painter;
-  const gif = GIFEncoder();
+  try {
+    const blob = await encodeGif();
+    if (!blob) return;
 
-  for (let i = 0; i < frames.length; i++) {
-    const frame = frames[i];
-    const palette = quantize(frame.data, 256);
-    const index = applyPalette(frame.data, palette);
-    gif.writeFrame(index, width, height, { palette, delay: 500, repeat: 0 });
+    const filename = gifFilename();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
 
-    if (i % 3 === 0) {
-      downloadGifBtn.textContent = `Encoding… ${Math.round(((i + 1) / frames.length) * 100)}%`;
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const settings = loadSettings();
+    if (hasAnyEnabled(settings)) {
+      downloadGifBtn.textContent = 'Uploading…';
+      uploadStatusEl.innerHTML = '<div class="upload-row pending">Uploading to cloud storage…</div>';
+      const { results, failures } = await uploadToAllEnabled(blob, filename, 'image/gif', settings);
+      renderUploadStatus(results, failures);
     }
+  } finally {
+    downloadGifBtn.disabled = false;
+    downloadGifBtn.textContent = origText;
   }
-
-  gif.finish();
-  const bytes = gif.bytes();
-  const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'image/gif' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'halftone.gif';
-  a.click();
-  URL.revokeObjectURL(url);
-
-  downloadGifBtn.disabled = false;
-  downloadGifBtn.textContent = origText;
 });
-
-function withUploadState(btn: HTMLButtonElement, fn: () => Promise<void>) {
-  return async () => {
-    const orig = btn.textContent!;
-    btn.disabled = true;
-    if (imgbbApiKeyInput.value.trim()) btn.textContent = 'Uploading…';
-    try { await fn(); } finally {
-      btn.disabled = false;
-      btn.textContent = orig;
-    }
-  };
-}
-
-// Share on Twitter / X
-shareTwitterBtn.addEventListener('click', withUploadState(shareTwitterBtn, async () => {
-  const imgbbUrl = await uploadToImgbb();
-  const tweetText = imgbbUrl && includeLinkCheck.checked
-    ? `${SHARE_TEXT} ${PROJECT_URL}`
-    : SHARE_TEXT;
-  const params = new URLSearchParams({ text: tweetText });
-  const shareUrl = imgbbUrl ?? (includeLinkCheck.checked ? PROJECT_URL : '');
-  if (shareUrl) params.set('url', shareUrl);
-  openShareWindow(`https://twitter.com/intent/tweet?${params}`);
-}));
-
-// Share on Facebook
-shareFacebookBtn.addEventListener('click', withUploadState(shareFacebookBtn, async () => {
-  const imgbbUrl = await uploadToImgbb();
-  const params = new URLSearchParams({ quote: SHARE_TEXT });
-  const shareUrl = imgbbUrl ?? (includeLinkCheck.checked ? PROJECT_URL : '');
-  if (shareUrl) params.set('u', shareUrl);
-  openShareWindow(`https://www.facebook.com/sharer/sharer.php?${params}`);
-}));
-
-// Share on Mastodon
-shareMastodonBtn.addEventListener('click', withUploadState(shareMastodonBtn, async () => {
-  const imgbbUrl = await uploadToImgbb();
-  const rawInstance = mastodonInstanceInput.value.trim() || 'mastodon.social';
-  const instance = rawInstance.replace(/^https?:\/\//, '').replace(/\/$/, '');
-  let text = SHARE_TEXT;
-  if (imgbbUrl) text += ` ${imgbbUrl}`;
-  if (includeLinkCheck.checked) text += ` ${PROJECT_URL}`;
-  openShareWindow(`https://${instance}/share?${new URLSearchParams({ text })}`);
-}));
