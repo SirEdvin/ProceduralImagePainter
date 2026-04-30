@@ -184,7 +184,6 @@ const canvas = document.getElementById('outputCanvas') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
 const startBtn = document.getElementById('startBtn') as HTMLButtonElement;
 const stopBtn = document.getElementById('stopBtn') as HTMLButtonElement;
-const downloadPngBtn = document.getElementById('downloadPngBtn') as HTMLButtonElement;
 const downloadGifBtn = document.getElementById('downloadGifBtn') as HTMLButtonElement;
 const saveResultBtn = document.getElementById('saveResultBtn') as HTMLButtonElement;
 const shareResultBtn = document.getElementById('shareResultBtn') as HTMLButtonElement;
@@ -263,23 +262,16 @@ function publicUrlBaseForProvider(provider: CloudProvider, settings: CloudSettin
   return provider === 'r2' ? settings.r2.publicUrlBase.trim() : settings.s3.publicUrlBase.trim();
 }
 
-function timestampedFilename(prefix: string, extension: string): string {
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace(/Z$/, '');
-  return `${prefix}-${stamp}.${extension}`;
-}
-
-function canvasToBlob(type: string = 'image/png'): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error('Could not export the generated image from the canvas.'));
-    }, type);
-  });
-}
-
-async function makeCanvasThumbnail(): Promise<string> {
-  const blob = await canvasToBlob('image/png');
-  return await makeThumbnail(blob);
+function makeOutputThumbnail(): string {
+  const max = 96;
+  const ratio = Math.min(max / canvas.width, max / canvas.height, 1);
+  const w = Math.max(1, Math.round(canvas.width * ratio));
+  const h = Math.max(1, Math.round(canvas.height * ratio));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  c.getContext('2d')!.drawImage(canvas, 0, 0, w, h);
+  return c.toDataURL('image/jpeg', 0.7);
 }
 
 function setActiveGeneratedImage(image: GeneratedImage | null): void {
@@ -754,9 +746,8 @@ startBtn.addEventListener('click', () => {
       setStatus(`Done — ${Math.round(coverage * 100)}% coverage, ${painter!.frames.length} frames`);
       startBtn.disabled = false;
       stopBtn.disabled = true;
-      downloadPngBtn.disabled = false;
       downloadGifBtn.disabled = painter!.frames.length === 0;
-      saveResultBtn.disabled = false;
+      saveResultBtn.disabled = painter!.frames.length === 0;
     },
   });
 
@@ -765,7 +756,6 @@ startBtn.addEventListener('click', () => {
   renderGeneratedGallery();
   startBtn.disabled = true;
   stopBtn.disabled = false;
-  downloadPngBtn.disabled = true;
   downloadGifBtn.disabled = true;
   saveResultBtn.disabled = true;
   setProgress(0);
@@ -780,35 +770,21 @@ stopBtn.addEventListener('click', () => {
   startBtn.disabled = false;
   stopBtn.disabled = true;
   setStatus('Stopped.');
-  downloadPngBtn.disabled = false;
   downloadGifBtn.disabled = !painter || painter.frames.length === 0;
-  saveResultBtn.disabled = !painter;
-});
-
-// Download PNG
-downloadPngBtn.addEventListener('click', () => {
-  canvas.toBlob((blob) => {
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'halftone.png';
-    a.click();
-    URL.revokeObjectURL(url);
-  });
+  saveResultBtn.disabled = !painter || painter.frames.length === 0;
 });
 
 saveResultBtn.addEventListener('click', async () => {
-  if (downloadPngBtn.disabled) return;
+  if (!painter || painter.frames.length === 0) return;
   const origText = saveResultBtn.textContent!;
   saveResultBtn.disabled = true;
   saveResultBtn.textContent = 'Saving…';
   try {
-    const blob = await canvasToBlob('image/png');
-    const thumbnail = await makeThumbnail(blob);
-    await uploadGeneratedBlob(blob, timestampedFilename('halftone', 'png'), 'image/png', thumbnail);
+    const blob = await encodeGif(saveResultBtn);
+    if (!blob) return;
+    await uploadGeneratedBlob(blob, gifFilename(), 'image/gif', makeOutputThumbnail());
   } finally {
-    saveResultBtn.disabled = downloadPngBtn.disabled;
+    saveResultBtn.disabled = !painter || painter.frames.length === 0;
     saveResultBtn.textContent = origText;
   }
 });
@@ -822,7 +798,7 @@ shareMastodonBtn.addEventListener('click', () => shareGeneratedImage('mastodon')
 shareXBtn.addEventListener('click', () => shareGeneratedImage('x'));
 shareFacebookBtn.addEventListener('click', () => shareGeneratedImage('facebook'));
 
-async function encodeGif(): Promise<Blob | null> {
+async function encodeGif(progressButton: HTMLButtonElement = downloadGifBtn): Promise<Blob | null> {
   if (!painter || painter.frames.length === 0) return null;
   const { frames, width, height } = painter;
   const gif = GIFEncoder();
@@ -832,7 +808,7 @@ async function encodeGif(): Promise<Blob | null> {
     const index = applyPalette(frame.data, palette);
     gif.writeFrame(index, width, height, { palette, delay: 500, repeat: 0 });
     if (i % 3 === 0) {
-      downloadGifBtn.textContent = `Encoding… ${Math.round(((i + 1) / frames.length) * 100)}%`;
+      progressButton.textContent = `Encoding… ${Math.round(((i + 1) / frames.length) * 100)}%`;
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
   }
@@ -898,7 +874,7 @@ downloadGifBtn.addEventListener('click', async () => {
     if (hasAnyEnabled(settings)) {
       downloadGifBtn.textContent = 'Uploading…';
       renderUploadMessage('pending', 'Uploading GIF to cloud storage…');
-      const thumbnail = await makeCanvasThumbnail();
+      const thumbnail = makeOutputThumbnail();
       const { results, failures } = await uploadToAllEnabled(blob, filename, 'image/gif', settings);
       if (results.length > 0) {
         await saveUploadedGeneratedResults(results, filename, 'image/gif', thumbnail);

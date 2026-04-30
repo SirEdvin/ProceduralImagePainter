@@ -15,12 +15,19 @@ export interface GeneratedImage {
 const STORAGE_KEY = 'generatedImages';
 const MAX_ITEMS = 24;
 
+function isGeneratedGif(item: GeneratedImage): boolean {
+  return item.type === 'image/gif' && item.name.toLowerCase().endsWith('.gif');
+}
+
 function readAll(): GeneratedImage[] {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as GeneratedImage[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    const items = (parsed as GeneratedImage[]).filter(isGeneratedGif);
+    if (items.length !== parsed.length) writeAll(items);
+    return items;
   } catch {
     return [];
   }
@@ -37,6 +44,9 @@ export function listGeneratedImages(): GeneratedImage[] {
 export function addGeneratedImage(
   entry: Omit<GeneratedImage, 'id' | 'addedAt'>,
 ): { added: GeneratedImage; evicted: GeneratedImage[] } {
+  if (entry.type !== 'image/gif' || !entry.name.toLowerCase().endsWith('.gif')) {
+    throw new Error('Generated images must be stored as GIF files.');
+  }
   const all = readAll();
   const added: GeneratedImage = {
     ...entry,
