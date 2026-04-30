@@ -304,6 +304,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .btn-row {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .btn {
@@ -342,6 +343,31 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .btn.primary:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+}
+
+.btn.small {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.btn.danger {
+  color: var(--danger);
+}
+
+.share-panel {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+
+.share-panel[hidden] {
+  display: none;
 }
 
 /* Output panel */
@@ -465,6 +491,100 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .upload-row a:hover {
   text-decoration: underline;
+}
+
+/* Generated gallery */
+.generated-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.generated-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.generated-header h3 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.generated-header span,
+.generated-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.generated-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.generated-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface2);
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s, transform 0.1s;
+}
+
+.generated-card:hover,
+.generated-card.selected {
+  border-color: var(--accent);
+}
+
+.generated-card:active {
+  transform: scale(0.99);
+}
+
+.generated-card img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: #fff;
+  display: block;
+}
+
+.generated-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  min-width: 0;
+}
+
+.generated-meta strong,
+.generated-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generated-meta strong {
+  font-size: 13px;
+}
+
+.generated-meta span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.generated-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 8px 8px;
 }
 
 /* Settings page */

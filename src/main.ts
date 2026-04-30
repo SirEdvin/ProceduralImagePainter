@@ -4,6 +4,7 @@ import {
   hasAnyEnabled,
   loadSettings,
   primaryProvider,
+  type CloudSettings,
   type CloudProvider,
   providerDisplayName,
   providerSettingsError,
@@ -11,6 +12,8 @@ import {
 import {
   deleteFromCloud,
   downloadFromCloud,
+  type CloudObjectRef,
+  type UploadFailure,
   uploadToAllEnabled,
   uploadToProvider,
 } from './cloudUpload';
@@ -28,6 +31,12 @@ import {
   removeCloudRecentImage,
   type CloudRecentImage,
 } from './cloudRecentImages';
+import {
+  addGeneratedImage,
+  listGeneratedImages,
+  removeGeneratedImage,
+  type GeneratedImage,
+} from './generatedImages';
 import { initSettingsPage } from './settingsPage';
 
 // Comprehensive list of common web fonts to test for availability
@@ -157,6 +166,7 @@ initSettingsPage();
 
 let painter: Painter | null = null;
 let currentBitmap: ImageBitmap | null = null;
+let activeGeneratedImage: GeneratedImage | null = null;
 
 const imageInput = document.getElementById('imageInput') as HTMLInputElement;
 const imagePreview = document.getElementById('imagePreview') as HTMLImageElement;
@@ -176,11 +186,18 @@ const startBtn = document.getElementById('startBtn') as HTMLButtonElement;
 const stopBtn = document.getElementById('stopBtn') as HTMLButtonElement;
 const downloadPngBtn = document.getElementById('downloadPngBtn') as HTMLButtonElement;
 const downloadGifBtn = document.getElementById('downloadGifBtn') as HTMLButtonElement;
+const saveResultBtn = document.getElementById('saveResultBtn') as HTMLButtonElement;
+const shareResultBtn = document.getElementById('shareResultBtn') as HTMLButtonElement;
+const sharePanel = document.getElementById('sharePanel') as HTMLDivElement;
+const shareMastodonBtn = document.getElementById('shareMastodonBtn') as HTMLButtonElement;
+const shareXBtn = document.getElementById('shareXBtn') as HTMLButtonElement;
+const shareFacebookBtn = document.getElementById('shareFacebookBtn') as HTMLButtonElement;
 const progressBar = document.getElementById('progressBar') as HTMLDivElement;
 const progressText = document.getElementById('progressText') as HTMLSpanElement;
 const statusText = document.getElementById('statusText') as HTMLSpanElement;
 const placeholder = document.getElementById('placeholder') as HTMLDivElement;
 const uploadStatusEl = document.getElementById('uploadStatus') as HTMLDivElement;
+const generatedGalleryEl = document.getElementById('generatedGallery') as HTMLDivElement;
 
 // Range label sync
 function bindRange(
@@ -236,6 +253,39 @@ function uploadFailureMessage(provider: CloudProvider, error: unknown, itemName:
 
 function providerStatusName(provider: string): string {
   return provider === 'r2' || provider === 's3' ? providerDisplayName(provider) : provider.toUpperCase();
+}
+
+function currentPhrase(): string {
+  return phraseInput.value.trim() || 'Untitled';
+}
+
+function publicUrlBaseForProvider(provider: CloudProvider, settings: CloudSettings): string {
+  return provider === 'r2' ? settings.r2.publicUrlBase.trim() : settings.s3.publicUrlBase.trim();
+}
+
+function timestampedFilename(prefix: string, extension: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace(/Z$/, '');
+  return `${prefix}-${stamp}.${extension}`;
+}
+
+function canvasToBlob(type: string = 'image/png'): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('Could not export the generated image from the canvas.'));
+    }, type);
+  });
+}
+
+async function makeCanvasThumbnail(): Promise<string> {
+  const blob = await canvasToBlob('image/png');
+  return await makeThumbnail(blob);
+}
+
+function setActiveGeneratedImage(image: GeneratedImage | null): void {
+  activeGeneratedImage = image;
+  shareResultBtn.disabled = !image;
+  if (!image) sharePanel.hidden = true;
 }
 
 function showCanvas() {
@@ -367,7 +417,225 @@ async function loadRecentEntry(entry: RecentEntry): Promise<void> {
   }
 }
 
+function shareTextForImage(image: GeneratedImage): string {
+  return `Generated with Procedural Image Painter: "${image.phrase}"`;
+}
+
+function openShareWindow(url: string): void {
+  window.open(url, '_blank', 'noopener,noreferrer,width=720,height=640');
+}
+
+function requireShareableUrl(image: GeneratedImage): boolean {
+  if (!image.url.includes('.r2.cloudflarestorage.com/')) return true;
+  const message = 'This R2 result was saved, but sharing needs a public R2 URL. Set Cloudflare R2 Public URL Base in Settings to your r2.dev URL or custom domain, then save the result again.';
+  setStatus(message);
+  renderUploadMessage('error', message);
+  return false;
+}
+
+function shareGeneratedImage(platform: 'mastodon' | 'x' | 'facebook'): void {
+  const image = activeGeneratedImage;
+  if (!image || !requireShareableUrl(image)) return;
+
+  const url = encodeURIComponent(image.url);
+  const text = encodeURIComponent(shareTextForImage(image));
+  if (platform === 'x') {
+    openShareWindow(`https://twitter.com/intent/tweet?text=${text}&url=${url}`);
+    return;
+  }
+  if (platform === 'facebook') {
+    openShareWindow(`https://www.facebook.com/sharer/sharer.php?u=${url}`);
+    return;
+  }
+
+  const savedServer = localStorage.getItem('mastodonShareServer') ?? 'mastodon.social';
+  const answer = prompt('Mastodon server', savedServer);
+  const server = answer?.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+  if (!server) return;
+  localStorage.setItem('mastodonShareServer', server);
+  openShareWindow(`https://${server}/share?text=${encodeURIComponent(`${shareTextForImage(image)}\n${image.url}`)}`);
+}
+
+function renderGeneratedGallery(): void {
+  const images = listGeneratedImages();
+  generatedGalleryEl.innerHTML = '';
+  if (images.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'generated-empty';
+    empty.textContent = 'Save a generated result to cloud storage and it will appear here.';
+    generatedGalleryEl.appendChild(empty);
+    setActiveGeneratedImage(null);
+    return;
+  }
+
+  if (!activeGeneratedImage || !images.some((image) => image.id === activeGeneratedImage?.id)) {
+    setActiveGeneratedImage(images[0]);
+  }
+
+  for (const image of images) {
+    generatedGalleryEl.appendChild(createGeneratedCard(image));
+  }
+}
+
+function createGeneratedCard(image: GeneratedImage): HTMLElement {
+  const card = document.createElement('article');
+  card.className = 'generated-card';
+  if (activeGeneratedImage?.id === image.id) card.classList.add('selected');
+
+  const img = document.createElement('img');
+  img.src = image.thumbnail;
+  img.alt = image.name;
+  card.appendChild(img);
+
+  const meta = document.createElement('div');
+  meta.className = 'generated-meta';
+  const title = document.createElement('strong');
+  title.textContent = image.phrase;
+  const details = document.createElement('span');
+  details.textContent = `${providerStatusName(image.provider)} · ${image.type.replace('image/', '').toUpperCase()} · ${new Date(image.addedAt).toLocaleString()}`;
+  meta.append(title, details);
+  card.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'generated-actions';
+
+  const open = document.createElement('a');
+  open.className = 'btn small';
+  open.href = image.url;
+  open.target = '_blank';
+  open.rel = 'noopener noreferrer';
+  open.textContent = 'Open';
+
+  const share = document.createElement('button');
+  share.type = 'button';
+  share.className = 'btn small';
+  share.textContent = 'Share';
+  share.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setActiveGeneratedImage(image);
+    sharePanel.hidden = false;
+    renderGeneratedGallery();
+  });
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'btn small danger';
+  remove.textContent = 'Remove';
+  remove.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await removeGeneratedEntry(image);
+  });
+
+  actions.append(open, share, remove);
+  card.appendChild(actions);
+  card.addEventListener('click', () => {
+    setActiveGeneratedImage(image);
+    sharePanel.hidden = true;
+    renderGeneratedGallery();
+  });
+  return card;
+}
+
+async function removeGeneratedEntry(image: GeneratedImage): Promise<void> {
+  const removed = removeGeneratedImage(image.id);
+  if (!removed) return;
+  if (activeGeneratedImage?.id === removed.id) setActiveGeneratedImage(null);
+  try {
+    await deleteFromCloud(removed.provider, removed.key, loadSettings());
+  } catch (e) {
+    console.warn('Failed to delete generated image from cloud', e);
+  }
+  renderGeneratedGallery();
+}
+
+async function saveGeneratedObject(
+  ref: CloudObjectRef,
+  name: string,
+  type: string,
+  thumbnail: string,
+  activate: boolean = true,
+): Promise<GeneratedImage> {
+  const { added, evicted } = addGeneratedImage({
+    provider: ref.provider,
+    key: ref.key,
+    url: ref.url,
+    name,
+    type,
+    phrase: currentPhrase(),
+    thumbnail,
+  });
+  const settings = loadSettings();
+  for (const entry of evicted) {
+    try { await deleteFromCloud(entry.provider, entry.key, settings); } catch { /* best-effort */ }
+  }
+  if (activate) {
+    setActiveGeneratedImage(added);
+    renderGeneratedGallery();
+  }
+  return added;
+}
+
+async function saveUploadedGeneratedResults(
+  refs: CloudObjectRef[],
+  name: string,
+  type: string,
+  thumbnail: string,
+): Promise<void> {
+  let selected: GeneratedImage | null = null;
+  for (const ref of refs) {
+    const image = await saveGeneratedObject(ref, name, type, thumbnail, false);
+    selected ??= image;
+  }
+  if (selected) {
+    setActiveGeneratedImage(selected);
+    renderGeneratedGallery();
+  }
+}
+
+async function uploadGeneratedBlob(
+  blob: Blob,
+  name: string,
+  type: string,
+  thumbnail: string,
+): Promise<GeneratedImage | null> {
+  const settings = loadSettings();
+  const provider = primaryProvider(settings);
+  if (!provider) {
+    const message = 'No cloud provider is enabled. Open Settings and enable Cloudflare R2 or Amazon S3 before saving generated results.';
+    setStatus(message);
+    renderUploadMessage('error', message);
+    return null;
+  }
+
+  const configError = providerSettingsError(provider, settings);
+  if (configError) {
+    const message = `${configError} Generated result was not stored. Open Settings to correct it.`;
+    setStatus(message);
+    renderUploadMessage('error', message);
+    return null;
+  }
+
+  try {
+    renderUploadMessage('pending', `Uploading generated result to ${providerDisplayName(provider)}…`);
+    const ref = await uploadToProvider(provider, blob, name, type, settings);
+    const image = await saveGeneratedObject(ref, name, type, thumbnail);
+    const shareHint = publicUrlBaseForProvider(provider, settings)
+      ? ''
+      : ' Configure Public URL Base in Settings before sharing publicly.';
+    const message = `Generated result stored on ${providerDisplayName(provider)}.${shareHint}`;
+    setStatus(message);
+    renderUploadMessage('ok', message);
+    return image;
+  } catch (e) {
+    const message = uploadFailureMessage(provider, e, 'Generated result');
+    setStatus(message);
+    renderUploadMessage('error', message);
+    return null;
+  }
+}
+
 renderRecentImages();
+renderGeneratedGallery();
 
 // Image upload — destination depends on the cloud-storage toggle
 imageInput.addEventListener('change', async () => {
@@ -488,14 +756,18 @@ startBtn.addEventListener('click', () => {
       stopBtn.disabled = true;
       downloadPngBtn.disabled = false;
       downloadGifBtn.disabled = painter!.frames.length === 0;
+      saveResultBtn.disabled = false;
     },
   });
 
   uploadStatusEl.innerHTML = '';
+  setActiveGeneratedImage(null);
+  renderGeneratedGallery();
   startBtn.disabled = true;
   stopBtn.disabled = false;
   downloadPngBtn.disabled = true;
   downloadGifBtn.disabled = true;
+  saveResultBtn.disabled = true;
   setProgress(0);
   setStatus('Starting…');
 
@@ -510,6 +782,7 @@ stopBtn.addEventListener('click', () => {
   setStatus('Stopped.');
   downloadPngBtn.disabled = false;
   downloadGifBtn.disabled = !painter || painter.frames.length === 0;
+  saveResultBtn.disabled = !painter;
 });
 
 // Download PNG
@@ -524,6 +797,30 @@ downloadPngBtn.addEventListener('click', () => {
     URL.revokeObjectURL(url);
   });
 });
+
+saveResultBtn.addEventListener('click', async () => {
+  if (downloadPngBtn.disabled) return;
+  const origText = saveResultBtn.textContent!;
+  saveResultBtn.disabled = true;
+  saveResultBtn.textContent = 'Saving…';
+  try {
+    const blob = await canvasToBlob('image/png');
+    const thumbnail = await makeThumbnail(blob);
+    await uploadGeneratedBlob(blob, timestampedFilename('halftone', 'png'), 'image/png', thumbnail);
+  } finally {
+    saveResultBtn.disabled = downloadPngBtn.disabled;
+    saveResultBtn.textContent = origText;
+  }
+});
+
+shareResultBtn.addEventListener('click', () => {
+  if (!activeGeneratedImage) return;
+  sharePanel.hidden = !sharePanel.hidden;
+});
+
+shareMastodonBtn.addEventListener('click', () => shareGeneratedImage('mastodon'));
+shareXBtn.addEventListener('click', () => shareGeneratedImage('x'));
+shareFacebookBtn.addEventListener('click', () => shareGeneratedImage('facebook'));
 
 async function encodeGif(): Promise<Blob | null> {
   if (!painter || painter.frames.length === 0) return null;
@@ -551,8 +848,8 @@ function gifFilename(): string {
 }
 
 function renderUploadStatus(
-  results: { provider: string; url: string }[],
-  failures: { provider: string; error: string }[],
+  results: CloudObjectRef[],
+  failures: UploadFailure[],
 ): void {
   uploadStatusEl.innerHTML = '';
   for (const r of results) {
@@ -601,7 +898,11 @@ downloadGifBtn.addEventListener('click', async () => {
     if (hasAnyEnabled(settings)) {
       downloadGifBtn.textContent = 'Uploading…';
       renderUploadMessage('pending', 'Uploading GIF to cloud storage…');
+      const thumbnail = await makeCanvasThumbnail();
       const { results, failures } = await uploadToAllEnabled(blob, filename, 'image/gif', settings);
+      if (results.length > 0) {
+        await saveUploadedGeneratedResults(results, filename, 'image/gif', thumbnail);
+      }
       renderUploadStatus(results, failures);
     }
   } finally {

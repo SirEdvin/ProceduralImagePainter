@@ -1,5 +1,6 @@
 import { AwsClient } from 'aws4fetch';
 import {
+  enabledProviders,
   providerSettingsError,
   r2SettingsError,
   s3SettingsError,
@@ -11,20 +12,17 @@ import {
 
 export type Provider = CloudProvider;
 
-export interface UploadResult {
-  provider: Provider;
-  url: string;
-}
-
-export interface UploadFailure {
-  provider: Provider;
-  error: string;
-}
-
 export interface CloudObjectRef {
   provider: Provider;
   key: string;
   url: string;
+}
+
+export type UploadResult = CloudObjectRef;
+
+export interface UploadFailure {
+  provider: Provider;
+  error: string;
 }
 
 function joinKey(prefix: string, filename: string): string {
@@ -143,21 +141,10 @@ export async function uploadToAllEnabled(
   contentType: string,
   settings: CloudSettings,
 ): Promise<{ results: UploadResult[]; failures: UploadFailure[] }> {
-  const tasks: Promise<UploadResult | UploadFailure>[] = [];
-  if (settings.s3.enabled) {
-    tasks.push(
-      uploadToS3(blob, filename, contentType, settings.s3)
-        .then<UploadResult>((url) => ({ provider: 's3', url }))
-        .catch<UploadFailure>((e) => ({ provider: 's3', error: String(e?.message ?? e) })),
-    );
-  }
-  if (settings.r2.enabled) {
-    tasks.push(
-      uploadToR2(blob, filename, contentType, settings.r2)
-        .then<UploadResult>((url) => ({ provider: 'r2', url }))
-        .catch<UploadFailure>((e) => ({ provider: 'r2', error: String(e?.message ?? e) })),
-    );
-  }
+  const tasks = enabledProviders(settings).map((provider) =>
+    uploadToProvider(provider, blob, filename, contentType, settings)
+      .catch<UploadFailure>((e) => ({ provider, error: String(e?.message ?? e) })),
+  );
   const settled = await Promise.all(tasks);
   const results: UploadResult[] = [];
   const failures: UploadFailure[] = [];

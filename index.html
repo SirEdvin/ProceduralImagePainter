@@ -98,9 +98,25 @@
         <div class="btn-row">
           <button id="downloadPngBtn" class="btn" disabled>Download PNG</button>
           <button id="downloadGifBtn" class="btn" disabled>Download GIF</button>
+          <button id="saveResultBtn" class="btn" disabled>Save Result</button>
+          <button id="shareResultBtn" class="btn" disabled>Share</button>
+        </div>
+
+        <div class="share-panel" id="sharePanel" hidden>
+          <button id="shareMastodonBtn" class="btn small">Mastodon</button>
+          <button id="shareXBtn" class="btn small">X</button>
+          <button id="shareFacebookBtn" class="btn small">Facebook</button>
         </div>
 
         <div class="upload-status" id="uploadStatus"></div>
+
+        <section class="generated-section">
+          <div class="generated-header">
+            <h3>Generated Gallery</h3>
+            <span>Saved cloud results</span>
+          </div>
+          <div class="generated-gallery" id="generatedGallery"></div>
+        </section>
       </section>
     </main>
 
@@ -114,6 +130,8 @@
         Credentials are stored in your browser's local storage on this device only. They are sent
         directly from your browser to the configured cloud provider — never to any other server.
         For uploads to succeed, the destination bucket must allow CORS PUT requests from this origin.
+        To share generated results publicly, configure Public URL Base to an r2.dev URL, custom
+        domain, or CDN URL that can read the stored objects.
       </p>
 
       <div class="settings-section" id="s3Section">
@@ -146,7 +164,7 @@
             <input type="text" id="s3PathPrefix" placeholder="gifs/" autocomplete="off" />
           </label>
           <label>
-            <span>Public URL Base (optional)</span>
+            <span>Public URL Base (required for sharing)</span>
             <input type="text" id="s3PublicUrlBase" placeholder="https://cdn.example.com" autocomplete="off" />
           </label>
         </div>
@@ -182,7 +200,7 @@
             <input type="text" id="r2PathPrefix" placeholder="gifs/" autocomplete="off" />
           </label>
           <label>
-            <span>Public URL Base (optional)</span>
+            <span>Public URL Base (required for sharing)</span>
             <input type="text" id="r2PublicUrlBase" placeholder="https://pub-xxxxx.r2.dev" autocomplete="off" />
           </label>
         </div>
