@@ -1,6 +1,13 @@
 import { Painter, type PainterConfig } from './painter';
 import { GIFEncoder, quantize, applyPalette } from 'gifenc';
-import { loadSettings, hasAnyEnabled, primaryProvider } from './settings';
+import {
+  hasAnyEnabled,
+  loadSettings,
+  primaryProvider,
+  type CloudProvider,
+  providerDisplayName,
+  providerSettingsError,
+} from './settings';
 import {
   deleteFromCloud,
   downloadFromCloud,
@@ -210,6 +217,27 @@ function setStatus(text: string) {
   statusText.textContent = text;
 }
 
+function renderUploadMessage(kind: 'ok' | 'error' | 'pending', text: string): void {
+  uploadStatusEl.innerHTML = '';
+  const row = document.createElement('div');
+  row.className = `upload-row ${kind}`;
+  row.textContent = text;
+  uploadStatusEl.appendChild(row);
+}
+
+function uploadFailureMessage(provider: CloudProvider, error: unknown, itemName: string): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  const providerName = providerDisplayName(provider);
+  const hint = /Failed to fetch|Load failed|NetworkError/i.test(detail)
+    ? `Check that the bucket CORS allows PUT from ${window.location.origin}, and verify the account ID, bucket, and credentials.`
+    : 'Check the bucket name, credentials, permissions, and CORS settings.';
+  return `${providerName} upload failed. ${itemName} was not stored in ${providerName}. ${detail} ${hint}`;
+}
+
+function providerStatusName(provider: string): string {
+  return provider === 'r2' || provider === 's3' ? providerDisplayName(provider) : provider.toUpperCase();
+}
+
 function showCanvas() {
   placeholder.style.display = 'none';
   canvas.style.display = 'block';
@@ -347,31 +375,48 @@ imageInput.addEventListener('change', async () => {
   if (!file) return;
 
   await loadBitmapFromBlob(file);
+  uploadStatusEl.innerHTML = '';
 
   const settings = loadSettings();
-  const provider = settings.recentImagesInCloud ? primaryProvider(settings) : null;
 
-  if (provider) {
-    try {
-      const thumbnail = await makeThumbnail(file);
-      const filename = `template-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-      setStatus(`Uploading template to ${provider.toUpperCase()}…`);
-      const ref = await uploadToProvider(provider, file, filename, file.type || 'image/png', settings);
-      const { evicted } = addCloudRecentImage({
-        provider: ref.provider,
-        key: ref.key,
-        url: ref.url,
-        name: file.name,
-        type: file.type || 'image/png',
-        thumbnail,
-      });
-      for (const e of evicted) {
-        try { await deleteFromCloud(e.provider, e.key, settings); } catch { /* best-effort */ }
+  if (settings.recentImagesInCloud) {
+    const provider = primaryProvider(settings);
+    if (!provider) {
+      const message = 'Recent template images are set to cloud storage, but no cloud provider is enabled. Template image was not stored. Open Settings and enable Cloudflare R2 or Amazon S3.';
+      setStatus(message);
+      renderUploadMessage('error', message);
+    } else {
+      const configError = providerSettingsError(provider, settings);
+      if (configError) {
+        const message = `${configError} Template image was not stored in ${providerDisplayName(provider)}. Open Settings to correct it.`;
+        setStatus(message);
+        renderUploadMessage('error', message);
+      } else {
+        try {
+          const filename = `template-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+          setStatus(`Uploading template to ${providerDisplayName(provider)}…`);
+          renderUploadMessage('pending', `Uploading template image to ${providerDisplayName(provider)}…`);
+          const thumbnail = await makeThumbnail(file);
+          const ref = await uploadToProvider(provider, file, filename, file.type || 'image/png', settings);
+          const { evicted } = addCloudRecentImage({
+            provider: ref.provider,
+            key: ref.key,
+            url: ref.url,
+            name: file.name,
+            type: file.type || 'image/png',
+            thumbnail,
+          });
+          for (const e of evicted) {
+            try { await deleteFromCloud(e.provider, e.key, settings); } catch { /* best-effort */ }
+          }
+          setStatus(`Template stored on ${providerDisplayName(provider)}`);
+          renderUploadMessage('ok', `Template image stored on ${providerDisplayName(provider)}.`);
+        } catch (e) {
+          const message = uploadFailureMessage(provider, e, 'Template image');
+          setStatus(message);
+          renderUploadMessage('error', message);
+        }
       }
-      setStatus(`Template stored on ${provider.toUpperCase()}`);
-    } catch (e) {
-      setStatus(`Cloud upload failed, falling back to local: ${(e as Error).message}`);
-      try { await addRecentImage(file); } catch (err) { console.warn('Failed to save recent image', err); }
     }
   } else {
     try {
@@ -514,7 +559,7 @@ function renderUploadStatus(
     const row = document.createElement('div');
     row.className = 'upload-row ok';
     const label = document.createElement('span');
-    label.textContent = `${r.provider.toUpperCase()}: `;
+    label.textContent = `${providerStatusName(r.provider)}: `;
     const link = document.createElement('a');
     link.href = r.url;
     link.target = '_blank';
@@ -526,7 +571,9 @@ function renderUploadStatus(
   for (const f of failures) {
     const row = document.createElement('div');
     row.className = 'upload-row error';
-    row.textContent = `${f.provider.toUpperCase()} upload failed: ${f.error}`;
+    row.textContent = f.provider === 'r2' || f.provider === 's3'
+      ? uploadFailureMessage(f.provider, f.error, 'GIF')
+      : `${providerStatusName(f.provider)} upload failed: ${f.error}`;
     uploadStatusEl.appendChild(row);
   }
 }
@@ -553,7 +600,7 @@ downloadGifBtn.addEventListener('click', async () => {
     const settings = loadSettings();
     if (hasAnyEnabled(settings)) {
       downloadGifBtn.textContent = 'Uploading…';
-      uploadStatusEl.innerHTML = '<div class="upload-row pending">Uploading to cloud storage…</div>';
+      renderUploadMessage('pending', 'Uploading GIF to cloud storage…');
       const { results, failures } = await uploadToAllEnabled(blob, filename, 'image/gif', settings);
       renderUploadStatus(results, failures);
     }

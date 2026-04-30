@@ -1,7 +1,15 @@
 import { AwsClient } from 'aws4fetch';
-import type { CloudSettings, R2Settings, S3Settings } from './settings';
+import {
+  providerSettingsError,
+  r2SettingsError,
+  s3SettingsError,
+  type CloudProvider,
+  type CloudSettings,
+  type R2Settings,
+  type S3Settings,
+} from './settings';
 
-export type Provider = 's3' | 'r2';
+export type Provider = CloudProvider;
 
 export interface UploadResult {
   provider: Provider;
@@ -57,18 +65,16 @@ function r2Client(r: R2Settings): AwsClient {
 }
 
 function clientForProvider(provider: Provider, settings: CloudSettings): { client: AwsClient; endpoint: (key: string) => string; publicBase: string } {
+  const configError = providerSettingsError(provider, settings);
+  if (configError) {
+    throw new Error(configError);
+  }
   if (provider === 's3') {
-    if (!settings.s3.accessKeyId || !settings.s3.secretAccessKey || !settings.s3.region || !settings.s3.bucket) {
-      throw new Error('S3 settings are incomplete');
-    }
     return {
       client: s3Client(settings.s3),
       endpoint: (k) => s3Endpoint(settings.s3, k),
       publicBase: settings.s3.publicUrlBase,
     };
-  }
-  if (!settings.r2.accountId || !settings.r2.accessKeyId || !settings.r2.secretAccessKey || !settings.r2.bucket) {
-    throw new Error('R2 settings are incomplete');
   }
   return {
     client: r2Client(settings.r2),
@@ -87,8 +93,9 @@ export async function uploadToS3(
   contentType: string,
   s: S3Settings,
 ): Promise<string> {
-  if (!s.accessKeyId || !s.secretAccessKey || !s.region || !s.bucket) {
-    throw new Error('S3 settings are incomplete');
+  const configError = s3SettingsError(s);
+  if (configError) {
+    throw new Error(configError);
   }
   const key = joinKey(s.pathPrefix, filename);
   const endpoint = s3Endpoint(s, key);
@@ -111,8 +118,9 @@ export async function uploadToR2(
   contentType: string,
   r: R2Settings,
 ): Promise<string> {
-  if (!r.accountId || !r.accessKeyId || !r.secretAccessKey || !r.bucket) {
-    throw new Error('R2 settings are incomplete');
+  const configError = r2SettingsError(r);
+  if (configError) {
+    throw new Error(configError);
   }
   const key = joinKey(r.pathPrefix, filename);
   const endpoint = r2Endpoint(r, key);

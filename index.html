@@ -197,8 +197,8 @@
           <span>Store recent template images in cloud storage instead of this browser</span>
         </label>
         <p class="settings-hint">
-          When enabled, uploaded template images are saved to the first enabled provider above
-          (S3 takes priority over R2). The bucket must allow CORS for <code>PUT</code>,
+          When enabled, uploaded template images are saved to Cloudflare R2 when R2 is enabled,
+          otherwise to Amazon S3. The bucket must allow CORS for <code>PUT</code>,
           <code>GET</code> and <code>DELETE</code> from this origin. Thumbnails stay in
           local storage so the picker stays fast.
         </p>

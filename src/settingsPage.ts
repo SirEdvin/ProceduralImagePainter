@@ -1,4 +1,4 @@
-import { clearSettings, loadSettings, saveSettings, type CloudSettings } from './settings';
+import { clearSettings, loadSettings, saveSettings, validateCloudSettings, type CloudSettings } from './settings';
 
 interface SettingsForm {
   s3Enabled: HTMLInputElement;
@@ -90,7 +90,7 @@ function readForm(f: SettingsForm): CloudSettings {
 function showStatus(el: HTMLDivElement, text: string, kind: 'ok' | 'error' = 'ok'): void {
   el.textContent = text;
   el.dataset.kind = kind;
-  if (text) {
+  if (text && kind === 'ok') {
     setTimeout(() => {
       if (el.textContent === text) {
         el.textContent = '';
@@ -106,7 +106,13 @@ export function initSettingsPage(): void {
 
   f.saveBtn.addEventListener('click', () => {
     try {
-      saveSettings(readForm(f));
+      const settings = readForm(f);
+      const errors = validateCloudSettings(settings);
+      if (errors.length > 0) {
+        showStatus(f.status, errors.join(' '), 'error');
+        return;
+      }
+      saveSettings(settings);
       showStatus(f.status, 'Saved.', 'ok');
     } catch (e) {
       showStatus(f.status, `Save failed: ${(e as Error).message}`, 'error');
